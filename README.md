@@ -19,3 +19,13 @@ echo 'PATH=$PATH:~/.platformio/penv/bin' >> ~/.profile
 pio project init --board xmc1100_xmc2go --board esp01
 git init; git add -A; git commit -m init
 ```
+
+For the moment:
+
+```
+cd ..
+git clone path/to/sentrifarm
+cd $OLDPWD
+cd lib
+ln -s ../../sentrifarm/software/mcu/libraries/SX1276lib
+```
