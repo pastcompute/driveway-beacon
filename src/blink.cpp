@@ -20,7 +20,9 @@ int n = 0;
 
 void loop()
 {
-  Serial.print(F("blink "));
+  Serial.print(F("blink - LED pin ="));
+  Serial.print(LED_BUILTIN);
+  Serial.print(F(" - "));
   Serial.print(n);
   Serial.print("                \r");
   n++;

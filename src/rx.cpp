@@ -1,8 +1,13 @@
+#define ENABLE_SPI
+// #undef ENABLE_SPI
+
 #include <Arduino.h>
+#if defined(ENABLE_SPI)
 #include <Wire.h>
 #include <SPI.h>
-#include <elapsedMillis.h>
+#include "elapsedMillis.h"
 #include "sx1276.h"
+#endif
 
 #define STRINGIFY(s) STRINGIFY1(s)
 #define STRINGIFY1(s) #s
@@ -26,12 +31,20 @@
 //     GPIO2  = LED4 (inverted)
 //
 
+#define ESP8266_WHITE8
+
+
 #if defined(ESP8266)
 #include <c_types.h>
 #include <Esp.h> // deep sleep
-#define PIN_LED4         4
 #define PIN_SX1276_RST   0
-#define PIN_SX1276_CS   15
+#ifdef ESP8266_WHITE8
+#define PIN_SX1276_CS    2
+#define PIN_LED4         15 // FFS the serial port shares LED_BUILTIN on the white board
+#else
+#define PIN_SX1276_CS    15
+#define PIN_LED4         4
+#endif
 #define PIN_SX1276_MISO 12
 #define PIN_SX1276_MOSI 13
 #define PIN_SX1276_SCK  14
@@ -55,22 +68,27 @@
 #error "Unsupported configuration"
 #endif
 
+
+#if defined(ENABLE_SPI)
 SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0); // double check
 
 SX1276Radio radio(PIN_SX1276_CS, spiSettings);
+#endif
 
 bool started_ok = false;
 
 ICACHE_FLASH_ATTR
 void setup()
 {
-  delay(1000); // let last of ESP8266 junk get past
+  delay(1500); // let last of ESP8266 junk get past
   Serial.begin(115200);
-  Serial.println();
+  Serial.println(F("Hello, world\n"));
 
-  Serial.print(F("\n\n\nSentrifarm : sx1276 beacon : "));
+  Serial.print(F("\n\n\nSentrifarm : sx1276 sniffer : "));
 #if defined(TEENSYDUINO)
   Serial.println(F("TEENSY-LC"));
+#elif defined(ESP8266_WHITE8)
+  Serial.println(F("ESP8266 Generic 16 pin breakout"));
 #elif defined(ESP8266)
   Serial.println(F("ESP8266 ESP-201"));
 #elif defined(XMC_BOARD)
@@ -78,16 +96,20 @@ void setup()
 #endif
 
   pinMode(PIN_LED4,        OUTPUT);
-  pinMode(PIN_SX1276_RST,  OUTPUT);
-  pinMode(PIN_SX1276_CS,   OUTPUT);
 
+#if defined(ESP8266_WHITE8)
+  digitalWrite(PIN_LED4, HIGH);
+#else
   // Power on the LED (active low2)
   digitalWrite(PIN_LED4, LOW);
+#endif
 
+  pinMode(PIN_SX1276_RST,  OUTPUT);
+  pinMode(PIN_SX1276_CS,   OUTPUT);
+#if defined(ENABLE_SPI)
 #if defined(TEENSYDUINO)
   SPI.setSCK(PIN_SX1276_SCK);
 #endif
-
   digitalWrite(PIN_SX1276_CS, HIGH);
   digitalWrite(PIN_SX1276_RST, HIGH);
   digitalWrite(PIN_SX1276_MISO, HIGH);
@@ -115,6 +137,7 @@ void setup()
   }
   SPI.end();
   delay(500);
+#endif
 }
 
 void go_to_sleep(int ms)
@@ -146,7 +169,9 @@ int rx_count = 0;
 int crc_count = 0;
 int timeout_count = 0;
 
+#if defined(ENABLE_SPI)
 elapsedMillis timeElapsed;
+#endif
 
 
 void loop() {
@@ -158,12 +183,13 @@ void loop() {
     return;
   }
 
-  SPI.begin();
-
   // If we get symbol timeout then double short flash and try again
   // If we get CRC then single longer flash
   // otherwise, latch LED on
   if (!got_message) { double_short(); }
+
+#if defined(ENABLE_SPI)
+  SPI.begin();
 
   byte buffer[128];
   bool crc_error = false;
@@ -212,4 +238,5 @@ void loop() {
     timeElapsed = 0;
   }
   SPI.end();  
+#endif
 }
