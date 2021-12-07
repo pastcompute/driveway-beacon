@@ -126,12 +126,17 @@ void go_to_sleep(int ms)
 #endif
 }
 
+int counter=0;
+char buffer[75] = "Hello, World! Hello, World!";
+int sp = strlen(buffer);
+
 void loop() {
-  const char BEACON_MSG[] = "Hello, World! Hello, World!";
+  
+  snprintf(buffer + sp, sizeof(buffer) - sp, " %d", counter);
   digitalWrite(PIN_LED4, LOW);
   if (started_ok) {
     SPI.begin();
-    radio.TransmitMessage(BEACON_MSG, sizeof(BEACON_MSG));
+    radio.TransmitMessage(buffer, strlen(buffer));
     radio.Standby();
     SPI.end();
     delay(500);
@@ -142,4 +147,5 @@ void loop() {
     digitalWrite(PIN_LED4, HIGH);
     delay(500);
   }
+  counter++;
 }
