@@ -204,6 +204,8 @@ void loop() {
   memset(buffer, 0, sizeof(buffer));
   if (radio.ReceiveMessage(buffer, sizeof(buffer), received, crc_error))
   {
+    radio.Standby(); // hmmm turns out we had to do this in line 325 of leaf.info; the 'node' version does it after transmit
+    // Because this library is using single mode... (it seems didn't port continuous mode into it...)
     Serial.print(F("Rx "));
     Serial.print(received);
     Serial.print(F(" "));
@@ -234,6 +236,7 @@ void loop() {
     rx_count ++;
     digitalWrite(PIN_LED4, LOW);
   } else if (crc_error) {
+    radio.Standby();
     crc_count ++;
     Serial.println("CRC\n");
     digitalWrite(PIN_LED4, HIGH);
