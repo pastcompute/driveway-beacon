@@ -82,9 +82,13 @@ void setup()
 {
   delay(1500); // let last of ESP8266 junk get past
   Serial.begin(115200);
-  Serial.println(F("Hello, world\n"));
+  delay(100);
+  Serial.println();
+  delay(100);
+  Serial.println();
+  delay(100);
 
-  Serial.print(F("\n\n\nSentrifarm : sx1276 sniffer : "));
+  Serial.print(F(".\n\r.\n\r.\n\rSentrifarm : sx1276 sniffer : "));
 #if defined(TEENSYDUINO)
   Serial.println(F("TEENSY-LC"));
 #elif defined(ESP8266_WHITE8)
@@ -118,7 +122,7 @@ void setup()
 
   // Reset the sx1276 module
   digitalWrite(PIN_SX1276_RST, LOW);
-  delay(10); // spec states to pull low 100us then wait at least 5 ms
+  delay(20); // spec states to pull low 100us then wait at least 5 ms
   digitalWrite(PIN_SX1276_RST, HIGH);
   delay(50);
 
@@ -140,6 +144,7 @@ void setup()
 #endif
 }
 
+#if 0
 void go_to_sleep(int ms)
 {
 #if defined(ESP8266)
@@ -149,6 +154,7 @@ void go_to_sleep(int ms)
   delay(ms);
 #endif
 }
+#endif
 
 void double_short()
 {
@@ -195,23 +201,32 @@ void loop() {
   bool crc_error = false;
   byte received = 0;
   elapsedMillis trx;
+  memset(buffer, 0, sizeof(buffer));
   if (radio.ReceiveMessage(buffer, sizeof(buffer), received, crc_error))
   {
+    Serial.print(F("Rx "));
+    Serial.print(received);
+    Serial.print(F(" "));
+    Serial.print(crc_error);
+    Serial.println();
     const int N=16;
-    byte r=0;
-    char buf[4];
+    int r=0;
+    char buf[6];
     for (int line=0; line < (received+N-1)/N; line++) {
-      snprintf(buf, sizeof(buf), "%02x ", r); Serial.print(buf);
-      byte r2 = r;
+      // print the byte address of the start of each row first
+      snprintf(buf, sizeof(buf), "%02x: ", r); Serial.print(buf);
+      int r2 = r;
       for (int c=0; c < N; c++, r++) {
         if (r < received) {
           snprintf(buf, sizeof(buf), "%02x ", buffer[r]); Serial.print(buf);
         } else { Serial.print(F("   ")); }
       }
+      Serial.print(F("    "));
       for (int c=0; c < N; c++, r2++) {
         if (r2 < received) {
-          Serial.print(char(buffer[r2]));
-        } else { Serial.print(' '); }
+          char v = buffer[r2];
+          Serial.print((v >=32 && v <=127) ? v : ' ');
+        } else { Serial.print('.'); }
       }
       Serial.println();
     }
