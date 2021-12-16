@@ -31,10 +31,8 @@
 //     GPIO2  = LED4 (inverted)
 //
 
-#define ESP8266_WHITE8
-
-
 #if defined(ESP8266)
+#define ESP8266_WHITE8
 #include <c_types.h>
 #include <Esp.h> // deep sleep
 #define PIN_SX1276_RST   0
@@ -57,7 +55,7 @@
 #define PIN_SX1276_SCK  14
 #define ICACHE_FLASH_ATTR
 #elif defined(XMC_BOARD)
-#define PIN_LED4         LED1
+#define PIN_LED4         LED_BUILTIN
 #define PIN_SX1276_RST  4
 #define PIN_SX1276_CS   3
 #define PIN_SX1276_MISO 0
@@ -68,6 +66,14 @@
 #error "Unsupported configuration"
 #endif
 
+#define LED_ON HIGH
+#define LED_OFF LOW
+#if defined(ESP8266_WHITE8)
+#elif defined(XMC_BOARD)
+#else
+#define LED_ON LOW
+#define LED_OFF HIGH
+#endif
 
 #if defined(ENABLE_SPI)
 SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0); // double check
@@ -80,7 +86,16 @@ bool started_ok = false;
 ICACHE_FLASH_ATTR
 void setup()
 {
-  delay(1500); // let last of ESP8266 junk get past
+  pinMode(PIN_LED4,        OUTPUT);
+  digitalWrite(PIN_LED4, LED_ON);
+#if defined XMC_BOARD
+  pinMode(LED2,        OUTPUT);
+  digitalWrite(LED2, LED_ON);
+  delay(4000);
+  digitalWrite(PIN_LED4, LED_OFF);
+#endif
+  delay(2500); // let last of ESP8266 junk get past
+  digitalWrite(PIN_LED4, LED_OFF);
   Serial.begin(115200);
   delay(100);
   Serial.println();
@@ -99,14 +114,6 @@ void setup()
   Serial.println(F(STRINGIFY(XMC_BOARD)));
 #endif
 
-  pinMode(PIN_LED4,        OUTPUT);
-
-#if defined(ESP8266_WHITE8)
-  digitalWrite(PIN_LED4, HIGH);
-#else
-  // Power on the LED (active low2)
-  digitalWrite(PIN_LED4, LOW);
-#endif
 
   pinMode(PIN_SX1276_RST,  OUTPUT);
   pinMode(PIN_SX1276_CS,   OUTPUT);
@@ -158,15 +165,15 @@ void go_to_sleep(int ms)
 
 void double_short()
 {
-  digitalWrite(PIN_LED4, HIGH);
+  digitalWrite(PIN_LED4, LED_ON);
   delay(250);
-  digitalWrite(PIN_LED4, LOW);
+  digitalWrite(PIN_LED4, LED_OFF);
   delay(250);
-  digitalWrite(PIN_LED4, HIGH);
+  digitalWrite(PIN_LED4, LED_ON);
   delay(250);
-  digitalWrite(PIN_LED4, LOW);
+  digitalWrite(PIN_LED4, LED_OFF);
   delay(250);
-  digitalWrite(PIN_LED4, HIGH);
+  digitalWrite(PIN_LED4, LED_ON);
 }
 
 bool got_message = false;
@@ -182,10 +189,17 @@ elapsedMillis timeElapsed;
 
 void loop() {
   if (!started_ok) {
-    digitalWrite(PIN_LED4, LOW);
+    digitalWrite(PIN_LED4, LED_OFF);
     delay(500);
-    digitalWrite(PIN_LED4, HIGH);
+    digitalWrite(PIN_LED4, LED_ON);
     delay(500);
+    digitalWrite(PIN_LED4, LED_OFF);
+    delay(500);
+    digitalWrite(PIN_LED4, LED_ON);
+    delay(500);
+    digitalWrite(PIN_LED4, LED_OFF);
+    delay(2500);
+    Serial.println(F("no start"));
     return;
   }
 
@@ -234,16 +248,16 @@ void loop() {
     }
     got_message = true;
     rx_count ++;
-    digitalWrite(PIN_LED4, LOW);
+    digitalWrite(PIN_LED4, LED_OFF);
   } else if (crc_error) {
     radio.Standby();
     crc_count ++;
     Serial.println("CRC\n");
-    digitalWrite(PIN_LED4, HIGH);
+    digitalWrite(PIN_LED4, LED_ON);
     delay(600);
-    digitalWrite(PIN_LED4, LOW);
+    digitalWrite(PIN_LED4, LED_OFF);
     delay(600);
-    digitalWrite(PIN_LED4, HIGH);
+    digitalWrite(PIN_LED4, LED_ON);
   } else {
     // Serial.println("timeout"); Serial.println(trx); Serial.println();
     timeout_count ++;
