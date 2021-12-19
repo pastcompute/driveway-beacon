@@ -7,6 +7,7 @@
 #include <SPI.h>
 #include "elapsedMillis.h"
 #include "sx1276.h"
+#include "sx1276reg.h"
 #endif
 
 #define STRINGIFY(s) STRINGIFY1(s)
@@ -84,6 +85,11 @@ SX1276Radio radio(PIN_SX1276_CS, spiSettings);
 bool started_ok = false;
 
 ICACHE_FLASH_ATTR
+void radioRxPoll(bool &abort) {
+  if (Serial.available()) { abort = true; }
+}
+
+ICACHE_FLASH_ATTR
 void setup()
 {
   pinMode(PIN_LED4,        OUTPUT);
@@ -147,6 +153,7 @@ void setup()
     started_ok = true;
   }
   SPI.end();
+  radio.SetReceivePollCallback(&radioRxPoll);
   delay(500);
 #endif
 }
@@ -202,6 +209,90 @@ void loop() {
     Serial.println(F("no start"));
     return;
   }
+
+  if (Serial.available()) {
+    char c = (char) Serial.read();
+    if (c == 'h' || c == '?') {
+#if defined(ENABLE_SPI)
+      SPI.begin();
+      radio.Standby();
+      uint32_t bw = 0, carrier = 0;
+      byte sf = radio.GetSpreadingFactor();
+      int toa = radio.PredictTimeOnAir(16);
+      radio.ReadCarrier(carrier);
+      radio.ReadBandwidth(bw);
+      SPI.end();
+      Serial.print("BW "); Serial.print(bw);
+      Serial.print(" SF "); Serial.print(sf);
+      Serial.print(" ToA(16bytes) "); Serial.print(toa);
+      Serial.print(" Carrier "); Serial.print(carrier);
+      Serial.println();
+#endif
+      Serial.print("Received message count: "); Serial.print(rx_count);
+      Serial.print(" Timeout count: "); Serial.print(timeout_count);
+      Serial.print(" CRC count: "); Serial.print(crc_count);
+      Serial.println();
+
+      Serial.println(F("s       Advance spreading factor"));
+      Serial.println(F("b       Advance bandwidth"));
+      Serial.println(F("c       Advance carrier 125k"));
+      Serial.println(F("h       Show this message"));
+      Serial.println();
+      return;
+    }
+    if (c == 'b') {
+      Serial.print(F("Advance bandwidth "));
+      uint32_t hz = radio.GetBandwidthHz();
+      byte bwb = radio.GetBandwidthIndex();
+      Serial.print(hz);
+      Serial.print(" -> ");
+      bwb++;
+      if (bwb > SX1276_LORA_BW_MAX) { bwb = SX1276_LORA_BW_MIN; }
+#if defined(ENABLE_SPI)
+      SPI.begin();
+      radio.Standby();
+      radio.SetBandwidth(bwb);
+      radio.ReadBandwidth(hz);
+      SPI.end();
+#endif
+      Serial.println(hz);
+      return;
+    }
+    if (c == 'c') {
+      Serial.print(F("Advance carrier "));
+      uint32_t hz = 0;
+#if defined(ENABLE_SPI)
+      SPI.begin();
+      radio.Standby();
+      radio.ReadCarrier(hz);
+      Serial.print(hz);
+      Serial.print(" -> ");
+      hz += 125000;
+      if (hz > 927000000) { hz = 919000000; }
+      radio.SetCarrier(hz);
+      radio.ReadCarrier(hz);
+      SPI.end();
+#endif
+      Serial.println(hz);
+      return;
+    }
+    if (c == 's') {
+      Serial.print(F("Advance spreading factor "));
+      byte sf = radio.GetSpreadingFactor();
+      Serial.print(sf);
+      Serial.print(" -> ");
+      sf++;
+      if (sf > SX1276_MAX_SPREADING_FACTOR) { sf = SX1276_MIN_SPREADING_FACTOR; }
+#if defined(ENABLE_SPI)
+      SPI.begin();
+      sf = radio.SetSpreadingFactor(sf);
+      SPI.end();
+#endif
+      Serial.println(sf);
+      return;
+    }
+  }
+
 
   // If we get symbol timeout then double short flash and try again
   // If we get CRC then single longer flash
