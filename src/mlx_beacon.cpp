@@ -62,8 +62,12 @@ void setupMlx() {
   if (MLX90393::STATUS_OK != mlx.begin(0, 0)) {
     Serial.println(F("Error starting MLX90393"));
   } else {
-    mlx.reset();
-    mlx.setDigitalFiltering(5);
+    mlx.reset(); // beware, this changes defaults from begin()
+    mlx.setGainSel(7);
+    mlx.setResolution(0, 0, 0);
+    mlx.setOverSampling(3); // increases mindelay
+    mlx.setTemperatureCompensation(0);
+    mlx.setDigitalFiltering(5); // reduces mindelay
     minDelay = mlx.convDelayMillis();
     Serial.print("MLX90393.minDelay="); Serial.println(minDelay);
     mlxStartedOk = true;
@@ -136,6 +140,9 @@ void loop() {
     lastMlx = 0;
   }
 
+  // TODO: interleave transmit between start and read, so that
+  // the ToA over compensates for the minDelay
+
   if (!faultMlx) {
     // Serial.println("Read mlx...");
     MLX90393::txyzRaw raw;
@@ -143,7 +150,7 @@ void loop() {
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Error starting MLX90393 measure"));
     }
-    if (minDelay < 1) { delayMicroseconds(600); } else { delay(minDelay); }
+    if (minDelay < 1) { delayMicroseconds(600); } else { delay(minDelay+10); }
     status = mlx.readMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG, raw);
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Error reading MLX90393 measure"));
