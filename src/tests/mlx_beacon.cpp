@@ -93,11 +93,17 @@ void setupRadio() {
   resetRadio();
   // init SPI and then program the chip to LoRa mode
   SPI.begin();
+
+  // default bw is 125
+  // Default is 9 - reducing to 7 significantly reduces ToA but that means our existing infra is deaf
+  // Mitigate by upgrading rx tool to allow serial console to cycle settings
+  radio.SetSpreadingFactor(7); // default 9
+
   Serial.print(F("SX1276: version=")); Serial.println(radio.ReadVersion());
   if (!radio.Begin()) {
     Serial.println(F("SX1276 init error"));
   } else {
-    radio.SetCarrier(919000000);
+    radio.SetCarrier(920000000);
     uint32_t carrier_hz = 0;
     radio.ReadCarrier(carrier_hz);
     Serial.print(F("Carrier: ")); Serial.println(carrier_hz);
