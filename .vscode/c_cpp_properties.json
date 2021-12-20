@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "Arduino",
+            "includePath": [
+                "~/.platformio/packages/framework-arduinoxmc/variants/XMC1100/config/XMC1100_Boot_Kit",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/7.2.1",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/7.2.1/arm-none-eabi",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/7.2.1/backward",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/7.2.1/include",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/7.2.1/include-fixed",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include",
+                "~/.platformio/packages/framework-arduinoxmc/cores",
+                "~/.platformio/packages/framework-arduinoxmc/cores/xmc_lib/LIBS",
+                "${workspaceFolder}/**",
+            ],
+            "defines": ["ARDUINO=100", "__USES_INITFINI__", "__STATIC_INLINE", "XMC1100_Q024x0064", "XMC1100_Boot_Kit", "XMC1100_T038x0064"],
+            "compilerPath": "~/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-gcc",
+            "cStandard": "c99",
+            "cppStandard": "gnu++98",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ],
+    "version": 4
+}
