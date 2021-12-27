@@ -3,21 +3,12 @@
         {
             "name": "Arduino",
             "includePath": [
-                "~/.platformio/packages/framework-arduinoxmc/variants/XMC1100/config/XMC1100_Boot_Kit",
-                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/7.2.1",
-                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/7.2.1/arm-none-eabi",
-                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/7.2.1/backward",
-                "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/7.2.1/include",
-                "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/7.2.1/include-fixed",
-                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include",
-                "~/.platformio/packages/framework-arduinoxmc/libraries/SPI/src",
-                "~/.platformio/packages/framework-arduinoxmc/cores",
-                "~/.platformio/packages/framework-arduinoxmc/cores/xmc_lib/LIBS",
-                "~/.platformio/packages/framework-arduinoxmc/cores/xmc_lib/XMCLib/inc",
-                "~/.platformio/packages/framework-arduinoxmc/cores/xmc_lib/CMSIS/Include",
-                "~/.platformio/packages/framework-arduinoxmc/variants/XMC1100",
-                "~/.platformio/packages/framework-arduinoxmc/cores/avr",
-                "${workspaceFolder}/src"
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/**",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/**",
+                "~/.platformio/packages/framework-arduinoxmc/libraries/**",
+                "~/.platformio/packages/framework-arduinoxmc/cores/**",
+                "~/.platformio/packages/framework-arduinoxmc/variants/XMC1100/**",
+                "${workspaceFolder:xmc1100-driveway-beacon}/lib/**"
             ],
             "defines": [
                 "ARDUINO=100",
@@ -30,7 +21,7 @@
             ],
             "compilerPath": "~/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-gcc",
             "cStandard": "c99",
-            "cppStandard": "gnu++98",
+            "cppStandard": "gnu++11",
             "intelliSenseMode": "linux-gcc-arm"
         }
     ],
