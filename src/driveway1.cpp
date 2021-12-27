@@ -202,7 +202,7 @@ static void setup_radio() {
     Serial.println(F("Init Fault: SX1276"));
   } else {
     // Lets use less power than 100mA (0xb default)
-    Radio.SetPowerLimit(2); // 3 --> 60mA instead of 100
+    Radio.SetPowerLimit(7); // 3 --> 60mA instead of 100
     SystemStatus.radioFault = false;
   }
   SPI.end();
