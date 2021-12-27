@@ -405,13 +405,16 @@ static void transmit1_start() {
   packet[12] = xxor;
   packet[13] = 0; // hack for possibly dodgy rx
   
+  digitalWrite(LED2, HIGH);
   SPI.begin();
   if (!Radio.TransmitMessage(packet, 14, false)) {
     // TX TIMEOUT - interrupt bit not set by the predicted toa...
   }
   Radio.Standby();
   SPI.end();
-  led_short_flash(LED2);
+
+  //led_short_flash(LED2); // <-- we can't do this it wastes 150ms...
+  digitalWrite(LED2, LOW);
 
   counter ++;
 }
