@@ -241,7 +241,7 @@ static void print_radio_state() {
   Serial.print(F(" fault=")); Serial.print(SystemStatus.radioFault);
   Serial.print(F(" tune=")); Serial.print(carrier_hz);
   Serial.print(F(" sf=")); Serial.print(sf);
-  Serial.print(F(" toa(14 bytes)=")); Serial.print(Radio.PredictTimeOnAir(14));
+  Serial.print(F(" toa(13 bytes)=")); Serial.print(Radio.PredictTimeOnAir(13));
   Serial.println();
 }
 
@@ -400,14 +400,17 @@ static void transmit1_start() {
   packet[9] = (SystemStatus.lastMagnitude >> 8) & 0xff;
   packet[10] = SystemStatus.lastTemperatureC;
   packet[11] = min(SystemStatus.backgroundInfo.movingAverage, 0xff);
+  packet[12] = 0;
+#if 0
   byte xxor = 0;
   for (int n=0; n < 12; n++) { xxor ^= packet[n]; }
   packet[12] = xxor;
   packet[13] = 0; // hack for possibly dodgy rx
+#endif
   
   digitalWrite(LED2, HIGH);
   SPI.begin();
-  if (!Radio.TransmitMessage(packet, 14, false)) {
+  if (!Radio.TransmitMessage(packet, 13, false)) {
     // TX TIMEOUT - interrupt bit not set by the predicted toa...
   }
   Radio.Standby();
