@@ -191,6 +191,8 @@ static void setup_radio() {
   if (!Radio.Begin()) {
     Serial.println(F("Init Fault: SX1276"));
   } else {
+    // Lets use less power than 100mA (0xb default)
+    Radio.SetPowerLimit(2); // 3 --> 60mA instead of 100
     SystemStatus.radioFault = false;
   }
   SPI.end();
@@ -229,7 +231,7 @@ static void print_radio_state() {
   Serial.print(F(" fault=")); Serial.print(SystemStatus.radioFault);
   Serial.print(F(" tune=")); Serial.print(carrier_hz);
   Serial.print(F(" sf=")); Serial.print(sf);
-  Serial.print(F(" toa(11 bytes)=")); Serial.print(Radio.PredictTimeOnAir(8));
+  Serial.print(F(" toa(14 bytes)=")); Serial.print(Radio.PredictTimeOnAir(14));
   Serial.println();
 }
 
@@ -372,26 +374,36 @@ static void transmit1_start() {
   // first draft - just do a full synchronous transmit
   byte packet[16];
 
+  static int counter = 0;
+
   // include time so we have some idea for proper statistical analysis
   uint32_t tEvent = SystemStatus.lastTime / 10;
-  packet[0] = 9;
+  packet[0] = 12;
   packet[1] = 0x5f;  // not really sF, but hey
   packet[2] = 1;     // this type of message
-  packet[3] = tEvent & 0xff;
-  packet[4] = (tEvent >> 8) & 0xff;
-  packet[5] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  packet[6] = SystemStatus.lastMagnitude & 0xff;
-  packet[7] = (SystemStatus.lastMagnitude >> 8) & 0xff;
-  packet[8] = SystemStatus.lastTemperatureC;
-  packet[9] = max(SystemStatus.backgroundInfo.movingAverage, 0xff);
-  int xxor = 0;
-  for (int n=0; n < 10; n++) { xxor ^= packet[n]; }
-  packet[10] = xxor;
+  packet[3] = (counter >> 8) & 0xff;
+  packet[4] = (counter & 0xff);
+  packet[5] = tEvent & 0xff;
+  packet[6] = (tEvent >> 8) & 0xff;
+  packet[7] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
+  packet[8] = SystemStatus.lastMagnitude & 0xff;
+  packet[9] = (SystemStatus.lastMagnitude >> 8) & 0xff;
+  packet[10] = SystemStatus.lastTemperatureC;
+  packet[11] = min(SystemStatus.backgroundInfo.movingAverage, 0xff);
+  byte xxor = 0;
+  for (int n=0; n < 12; n++) { xxor ^= packet[n]; }
+  packet[12] = xxor;
+  packet[13] = 0; // hack for possibly dodgy rx
   
   SPI.begin();
-  Radio.TransmitMessage(packet, 11);
+  if (!Radio.TransmitMessage(packet, 14, false)) {
+    // TX TIMEOUT - interrupt bit not set by the predicted toa...
+  }
   Radio.Standby();
   SPI.end();
+  led_short_flash(LED2);
+
+  counter ++;
 }
 
 static void next_processing() {
@@ -407,18 +419,15 @@ static void next_processing() {
       return;
     }
     elapsedMillis started;
-
-    // OK, while we are waiting for the next, send of the previous one...
-    if (SystemStatus.pendingTransmission1) {
-      transmit1_start();
-      SystemStatus.pendingTransmission1 = false;
-    }
-
     SystemStatus.tSensorReadingRequested = started;
     SystemStatus.pendingSensorReading = true;
-    return;
   }
-  if (SystemStatus.tSensorReadingRequested >= SystemStatus.mlxMinDelayHeuristic) {
+  // OK, while we are waiting for the next, send of the previous one...
+  if (SystemStatus.pendingTransmission1) {
+    transmit1_start();
+    SystemStatus.pendingTransmission1 = false;
+  }
+  if (SystemStatus.pendingSensorReading && SystemStatus.tSensorReadingRequested >= SystemStatus.mlxMinDelayHeuristic) {
     MLX90393::txyzRaw raw;
     auto status = MlxSensor.readMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG, raw);
     if (status & MLX90393::ERROR_BIT) {
