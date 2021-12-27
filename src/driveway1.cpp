@@ -17,12 +17,22 @@
   along with SentriFarm Driveway Monitor.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+// Enable pin 6/7 TX/RX instead of USB
+#define SERIAL_ONBOARD 1
+
 #include <Arduino.h>
 #include <MLX90393.h>
 #include <elapsedMillis.h>
 #include <SPI.h>
 #include "sx1276.h"
 #include "sx1276reg.h"
+
+// Sanity check our pio settings, because unfortunately this affects arduino main cpp
+#ifdef SERIAL_DEBUG
+#ifdef SERIAL_ONBOARD
+#error oops
+#endif
+#endif
 
 // Design decisions:
 // - intentionally use a single ino and hybrid C/C++ instead of a modularised series of h/cpp files for main code
