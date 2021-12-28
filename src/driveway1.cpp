@@ -24,8 +24,8 @@
 #include <MLX90393.h>
 #include <elapsedMillis.h>
 #include <SPI.h>
-#include "sx1276.h"
 #include "sx1276reg.h"
+#include "sx1276.h"
 
 // Sanity check our pio settings, because unfortunately this affects arduino main cpp
 #ifdef SERIAL_DEBUG
@@ -439,8 +439,12 @@ static void next_processing() {
     SystemStatus.pendingSensorReading = true;
   }
   // OK, while we are waiting for the next, send of the previous one...
+  elapsedMillis t1;
+  elapsedMillis t2;
   if (SystemStatus.pendingTransmission1) {
+    // sf7, bw62500, 14bytes == 286ms (after removing xor and LED), way longer than toa of 102?
     transmit1_start();
+    t2 = 0;
     SystemStatus.pendingTransmission1 = false;
   }
   if (SystemStatus.pendingSensorReading && SystemStatus.tSensorReadingRequested >= SystemStatus.mlxMinDelayHeuristic) {
@@ -455,8 +459,11 @@ static void next_processing() {
     SystemStatus.pendingSensorReading = false;
     const MLX90393::txyz values = MlxSensor.convertRaw(raw);
     float magnitude = sqrt(values.x * values.x + values.y * values.y + values.z * values.z);
-#if 0
+#if 1
     Serial.print(F("Data: "));
+    Serial.print(SystemStatus.tSensorReadingRequested.get()); Serial.print(',');
+    Serial.print(t1); Serial.print(',');
+    Serial.print(t2); Serial.print(',');
     Serial.print((int)magnitude); Serial.print(',');
     Serial.print((int)values.t);
     Serial.println();
