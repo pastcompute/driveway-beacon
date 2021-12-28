@@ -6,8 +6,8 @@
 #include <Wire.h>
 #include <SPI.h>
 #include "elapsedMillis.h"
-#include "sx1276.h"
 #include "sx1276reg.h"
+#include "sx1276.h"
 #endif
 
 #define STRINGIFY(s) STRINGIFY1(s)
@@ -142,11 +142,15 @@ void setup()
   // init SPI and then program the chip to LoRa mode
   SPI.begin();
   Serial.print(F("SX1276: version=")); Serial.println(radio.ReadVersion());
+  radio.SetLNAGain(SX1276_LORA_LNA_GAIN_G1);
+  // reminder SF 125000/920000000/9
+  radio.SetCarrier(920000000);
+  radio.SetBandwidth(SX1276_LORA_BW_62500);
+  radio.SetSpreadingFactor(9);
   if (!radio.Begin()) {
     Serial.println(F("SX1276 init error"));
     // TODO: flash the LED
   } else {
-    radio.SetCarrier(919000000);
     uint32_t carrier_hz = 0;
     radio.ReadCarrier(carrier_hz);
     Serial.print(F("Carrier: ")); Serial.println(carrier_hz);
@@ -285,7 +289,7 @@ void loop() {
       if (sf > SX1276_MAX_SPREADING_FACTOR) { sf = SX1276_MIN_SPREADING_FACTOR; }
 #if defined(ENABLE_SPI)
       SPI.begin();
-      sf = radio.SetSpreadingFactor(sf);
+      radio.SetSpreadingFactor(sf);
       SPI.end();
 #endif
       Serial.println(sf);

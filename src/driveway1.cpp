@@ -150,7 +150,7 @@ static struct SystemStatus_t {
 } SystemStatus;
 
 static SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
-static SX1276Radio Radio(PIN_SX1276_CS, spiSettings);
+static SX1276Radio Radio(PIN_SX1276_CS, spiSettings, true);
 static MLX90393 MlxSensor;
 
 // Care - not re-entrant
@@ -201,8 +201,19 @@ static void setup_radio() {
   if (!Radio.Begin()) {
     Serial.println(F("Init Fault: SX1276"));
   } else {
-    // Lets use less power than 100mA (0xb default)
-    Radio.SetPowerLimit(7); // 3 --> 60mA instead of 100
+    // - Default spreading factor is 9 - reducing to 7 significantly reduces ToA
+    Radio.SetSpreadingFactor(7);
+    Radio.SetCarrier(920000000);
+    // - Increasing BW reduces ToA but theoretically reduces range
+    Radio.SetBandwidth(SX1276_LORA_BW_125000);
+
+    // For 13 bytes: ToA, Tx, revisit
+    // 125000,8 --> 91 99 135
+    // 125000,7 --> 50 ? ?
+    // 62500,8 --> ? ? 226
+    // 62500,7 --> 102 111 148
+    // Problem is loss of comms at over a few cm of range - due to antenna, or something else? or bug in rx?
+
     SystemStatus.radioFault = false;
   }
   SPI.end();
@@ -288,13 +299,6 @@ void setup() {
   digitalWrite(PIN_SX1276_RST, HIGH);
 
   reset_radio();
-  // Preset the config that will get loaded on radio.Begin()
-  // - The default bandwidth is 125
-  // - Default spreading factor is 9 - reducing to 7 significantly reduces ToA but that means our existing infra is deaf
-  // - Mitigate by upgrading rx tool to allow serial console to cycle settings
-  Radio.SetSpreadingFactor(7);
-  Radio.SetCarrier(RADIO_CARRIER_HZ);
-  Radio.SetBandwidth(SX1276_LORA_BW_125000);
 
   delay(SERIAL_BOOT_DELAY_MS);
   led_clear();
