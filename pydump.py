@@ -11,21 +11,21 @@ pat = re.compile(" ")
 rssi_valid = False
 t0 = 0
 t1 = 0
+nn = 0
 
 while True:
+    nn = nn + 1
     try:
         bytes = ser.readline()
         t1 = time.time()
-        #decoded_bytes = float(ser_bytes[0:len(ser_bytes)-2].decode("utf-8"))
-        #print(decoded_bytes)
         if len(bytes) < 3:
             # obviously not hex address:
             #print(bytes)
             rssi_valid = False
             continue
-        aa = bytes[0:3]
-        if aa != "00:":
-            s = bytes.decode("utf-8").rstrip().lstrip()
+        s = bytes.decode("utf-8").rstrip().lstrip()
+        #print(nn, s)
+        if s[0:3] != '00:':
             if s[0:3] == "Rx ":
                 # Note: rssi_valid should now be true...
                 continue
@@ -43,7 +43,7 @@ while True:
             print("UNKNOWN,%s" % bytes.decode("utf-8").rstrip().lstrip())
             rssi_valid = False
             continue
-        bytes2 = pat.split(bytes[4:])
+        bytes2 = pat.split(s[4:])
         payload_len = int(bytes2[0], 16)
         if len(bytes2) < payload_len or payload_len < 4:
             print("Payload rx length error: " + bytes2)
