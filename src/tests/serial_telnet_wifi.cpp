@@ -1,5 +1,30 @@
 #include "ESPTelnet.h"          
 
+class elapsedMillis
+{
+private:
+	unsigned long ms;
+public:
+	elapsedMillis(void) { ms = millis(); }
+	elapsedMillis(unsigned long val) { ms = millis() - val; }
+	elapsedMillis(const elapsedMillis &orig) { ms = orig.ms; }
+	operator unsigned long () const { return millis() - ms; }
+	elapsedMillis & operator = (const elapsedMillis &rhs) { ms = rhs.ms; return *this; }
+	elapsedMillis & operator = (unsigned long val) { ms = millis() - val; return *this; }
+	elapsedMillis & operator -= (unsigned long val)      { ms += val ; return *this; }
+	elapsedMillis & operator += (unsigned long val)      { ms -= val ; return *this; }
+	elapsedMillis operator - (int val) const           { elapsedMillis r(*this); r.ms += val; return r; }
+	elapsedMillis operator - (unsigned int val) const  { elapsedMillis r(*this); r.ms += val; return r; }
+	elapsedMillis operator - (long val) const          { elapsedMillis r(*this); r.ms += val; return r; }
+	elapsedMillis operator - (unsigned long val) const { elapsedMillis r(*this); r.ms += val; return r; }
+	elapsedMillis operator + (int val) const           { elapsedMillis r(*this); r.ms -= val; return r; }
+	elapsedMillis operator + (unsigned int val) const  { elapsedMillis r(*this); r.ms -= val; return r; }
+	elapsedMillis operator + (long val) const          { elapsedMillis r(*this); r.ms -= val; return r; }
+	elapsedMillis operator + (unsigned long val) const { elapsedMillis r(*this); r.ms -= val; return r; }
+	unsigned long get() const { return ms; }
+};
+
+
 /* ------------------------------------------------- */
 
 #define SERIAL_SPEED    115200
@@ -14,6 +39,9 @@ ESPTelnet telnet;
 IPAddress ip;
 
 /* ------------------------------------------------- */
+
+elapsedMillis lastRx;
+elapsedMillis lastTx;
 
 void setupSerial(long speed, String msg = "") {
   Serial.begin(speed);
@@ -88,15 +116,17 @@ void setupTelnet() {
   // passing a lambda function
   telnet.onInputReceived([](String str) {
     // checks for a certain command
+#if LEDS_WORK
     digitalWrite(LED_BUILTIN, LOW);
-    if (str == "\x04\x04\x04ping") {
+#endif
+    if (str == "ping") {
       telnet.println("> pong");
 #if DEBUGS
       Serial.println("- Telnet: pong");
 #endif
     }
     Serial.print(str);
-    digitalWrite(LED_BUILTIN, HIGH);
+    lastTx = 0;
   });
 
 #if DEBUGS
@@ -119,6 +149,9 @@ void setupTelnet() {
 
 // (optional) callback functions for telnet events
 void onTelnetConnect(String ip) {
+#if LEDS_WORK
+  digitalWrite(LED_BUILTIN, HIGH);
+#endif
 #if DEBUGS
   Serial.print("- Telnet: ");
   Serial.print(ip);
@@ -155,7 +188,10 @@ void onTelnetConnectionAttempt(String ip) {
 /* ------------------------------------------------- */
 
 void setup() {
+#if LEDS_WORK
   pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+#endif
   setupSerial(SERIAL_SPEED, "Telnet Test");
   
 #if DEBUGS
@@ -185,10 +221,18 @@ void loop() {
 
   // send serial input to telnet as output
   if (Serial.available()) {
+#if LEDS_WORK
     digitalWrite(LED_BUILTIN, LOW);
+#endif
     telnet.print(Serial.read());
-    digitalWrite(LED_BUILTIN, HIGH);
+    lastRx = 0;
   }
   // and telnet data back to serial
+
+  if (lastRx > 1000 && lastTx > 1000) {
+#if LEDS_WORK
+    digitalWrite(LED_BUILTIN, HIGH);
+#endif
+  }
 }
 //* ------------------------------------------------- */
