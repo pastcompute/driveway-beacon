@@ -466,20 +466,25 @@ static void next_processing() {
     SystemStatus.pendingSensorReading = false;
     const MLX90393::txyz values = MlxSensor.convertRaw(raw);
     float magnitude = sqrt(values.x * values.x + values.y * values.y + values.z * values.z);
-#if 1
-    Serial.print(F("Data: "));
-    Serial.print(SystemStatus.tSensorReadingRequested.get()); Serial.print(',');
-    Serial.print(t1); Serial.print(',');
-    Serial.print(t2); Serial.print(',');
-    Serial.print((int)magnitude); Serial.print(',');
-    Serial.print((int)values.t);
-    Serial.println();
-#endif
     // TODO: handle wrap
     SystemStatus.lastTime = SystemStatus.tSensorReadingRequested.get() - SystemStatus.tStart.get();
     SystemStatus.lastMagnitude = magnitude;
     SystemStatus.lastTemperatureC = values.t;
     SystemStatus.pendingTransmission1 = true;
+#if 1
+    // Slow this down so we dont overload the esp01 when attached for debug
+    static int counterSer = 0;
+    if (counterSer ++ % 10 == 0) {
+      // Serial.print(F("Data: "));
+      Serial.print(SystemStatus.tSensorReadingRequested.get()); Serial.print(',');
+      // Serial.print(t1); Serial.print(',');
+      // Serial.print(t2); Serial.print(',');
+      Serial.print(SystemStatus.lastTime); Serial.print(',');
+      Serial.print((int)magnitude); Serial.print(',');
+      Serial.print((int)values.t);
+      Serial.println();
+    }
+#endif
   }
 }
 
