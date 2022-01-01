@@ -2,8 +2,9 @@ import serial
 import re
 import time
 import math
+import sys
 
-ser = serial.Serial('/dev/ttyUSB1', 115200, parity=serial.PARITY_NONE, stopbits=1, rtscts=0, xonxoff=0, timeout=None)
+ser = serial.Serial('/dev/ttyAMA0', 115200, parity=serial.PARITY_NONE, stopbits=1, rtscts=0, xonxoff=0, timeout=None)
 ser.flushInput()
 
 pat = re.compile(" ")
@@ -14,6 +15,7 @@ t1 = 0
 nn = 0
 
 while True:
+    sys.stdout.flush()
     nn = nn + 1
     try:
         bytes = ser.readline()
@@ -73,10 +75,11 @@ while True:
             rssi = -1
             snr = -1
         print("data,%.03f,%s%03d,%d,%d,%d,%d,%d,%s,%s" % (t1, t, ms, counter, ticks10*10, magnitude, tempC, baseline, rssi, snr))
+        sys.stdout.flush()
         rssi_valid = False
         t0 = 0
     except KeyboardInterrupt as e:
         break
     except Exception as e2:
         print(e2)
-        break
+        continue

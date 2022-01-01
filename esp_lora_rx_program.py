@@ -3,6 +3,8 @@ import digitalio
 import time
 import serial
 
+# pio run -e esp:rx -t upload --upload-port /dev/ttyAMA0
+
 reset = digitalio.DigitalInOut(board.D2)
 reset.direction = digitalio.Direction.OUTPUT
 
