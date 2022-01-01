@@ -18,7 +18,7 @@
 */
 
 // Enable pin 6/7 TX/RX instead of USB
-#define SERIAL_ONBOARD 1
+// From pio, use -DSERIAL_ONBOARD=1
 
 #include <Arduino.h>
 #include <MLX90393.h>
@@ -30,7 +30,10 @@
 // Sanity check our pio settings, because unfortunately this affects arduino main cpp
 #ifdef SERIAL_DEBUG
 #ifdef SERIAL_ONBOARD
-#error oops
+#error oops1
+#endif
+#ifdef SERIAL_HOSTPC
+#error oops2
 #endif
 #endif
 
