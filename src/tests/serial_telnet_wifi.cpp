@@ -1,5 +1,23 @@
 #include "ESPTelnet.h"          
 
+// ESP01
+//
+//    +-------------------+
+//    |  1   2   3   4    |          1 = Vcc 2 = RST 3 = CHPD  4 = Tx/LED
+//    |  5   6   7   8    |          5 = RX  6 = GP0/PGM_ 7 = GP2   8 = GND
+//    |                   |
+//    |                   |
+//    |                   |
+//    |                   |
+//    |                   |
+//    |      Chip         |
+//    |                   |
+//    |                   |
+//    |      Antenna      |
+//    +-------------------+
+
+
+
 class elapsedMillis
 {
 private:
@@ -28,8 +46,8 @@ public:
 /* ------------------------------------------------- */
 
 #define SERIAL_SPEED    115200
-#define WIFI_SSID       "dropbear"
-#define WIFI_PASSWORD   "yesterda7"
+#define WIFI_SSID       "swamp"
+#define WIFI_PASSWORD   ""
 
 #define DEBUGS 0
 
