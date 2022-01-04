@@ -475,11 +475,9 @@ static void next_processing() {
     // Slow this down so we dont overload the esp01 when attached for debug
     static int counterSer = 0;
     if (counterSer ++ % 10 == 0) {
-      // Serial.print(F("Data: "));
-      Serial.print(SystemStatus.tSensorReadingRequested.get()); Serial.print(',');
-      // Serial.print(t1); Serial.print(',');
-      // Serial.print(t2); Serial.print(',');
+      Serial.print(counterSer-1); Serial.print(',');
       Serial.print(SystemStatus.lastTime); Serial.print(',');
+      Serial.print(SystemStatus.tSensorReadingRequested); Serial.print(',');
       Serial.print((int)magnitude); Serial.print(',');
       Serial.print((int)values.t);
       Serial.println();
