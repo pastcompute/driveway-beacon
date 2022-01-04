@@ -145,8 +145,8 @@ void setup()
   radio.SetLNAGain(SX1276_LORA_LNA_GAIN_G1);
   // reminder SF 125000/920000000/9
   radio.SetCarrier(920000000);
-  radio.SetBandwidth(SX1276_LORA_BW_62500);
-  radio.SetSpreadingFactor(9);
+  radio.SetBandwidth(SX1276_LORA_BW_125000);
+  radio.SetSpreadingFactor(7);
   if (!radio.Begin()) {
     Serial.println(F("SX1276 init error"));
     // TODO: flash the LED
@@ -315,11 +315,11 @@ void loop() {
   {
     radio.Standby(); // hmmm turns out we had to do this in line 325 of leaf.info; the 'node' version does it after transmit
     // Because this library is using single mode... (it seems didn't port continuous mode into it...)
-    Serial.print(F("Rx "));
-    Serial.print(received);
-    Serial.print(F(" "));
-    Serial.print(crc_error);
-    Serial.println();
+    //Serial.print(F("Rx "));
+    //Serial.print(received);
+    //Serial.print(F(" "));
+    //Serial.print(crc_error);
+    //Serial.println();
     const int N=16;
     int r=0;
     char buf[6];

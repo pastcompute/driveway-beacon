@@ -27,5 +27,6 @@ cd ..
 git clone path/to/sentrifarm
 cd $OLDPWD
 cd lib
+git clone https://github.com/pastcompute/arduino-MLX90393
 ln -s ../../sentrifarm/software/mcu/libraries/SX1276lib
 ```

@@ -2,8 +2,11 @@ import serial
 import re
 import time
 import math
+import sys
 
-ser = serial.Serial('/dev/ttyUSB1', 115200, parity=serial.PARITY_NONE, stopbits=1, rtscts=0, xonxoff=0, timeout=None)
+# strings mlog6.txt|egrep ^data | egrep -v ',7[0-9],[2-4][0-9],79' |grep -v ,8[0-3],[2-4]
+
+ser = serial.Serial('/dev/ttyAMA0', 115200, parity=serial.PARITY_NONE, stopbits=1, rtscts=0, xonxoff=0, timeout=None)
 ser.flushInput()
 
 pat = re.compile(" ")
@@ -11,21 +14,22 @@ pat = re.compile(" ")
 rssi_valid = False
 t0 = 0
 t1 = 0
+nn = 0
 
 while True:
+    sys.stdout.flush()
+    nn = nn + 1
     try:
         bytes = ser.readline()
         t1 = time.time()
-        #decoded_bytes = float(ser_bytes[0:len(ser_bytes)-2].decode("utf-8"))
-        #print(decoded_bytes)
         if len(bytes) < 3:
             # obviously not hex address:
             #print(bytes)
             rssi_valid = False
             continue
-        aa = bytes[0:3]
-        if aa != "00:":
-            s = bytes.decode("utf-8").rstrip().lstrip()
+        s = bytes.decode("utf-8").rstrip().lstrip()
+        #print(nn, s)
+        if s[0:3] != '00:':
             if s[0:3] == "Rx ":
                 # Note: rssi_valid should now be true...
                 continue
@@ -43,7 +47,7 @@ while True:
             print("UNKNOWN,%s" % bytes.decode("utf-8").rstrip().lstrip())
             rssi_valid = False
             continue
-        bytes2 = pat.split(bytes[4:])
+        bytes2 = pat.split(s[4:])
         payload_len = int(bytes2[0], 16)
         if len(bytes2) < payload_len or payload_len < 4:
             print("Payload rx length error: " + bytes2)
@@ -73,10 +77,11 @@ while True:
             rssi = -1
             snr = -1
         print("data,%.03f,%s%03d,%d,%d,%d,%d,%d,%s,%s" % (t1, t, ms, counter, ticks10*10, magnitude, tempC, baseline, rssi, snr))
+        sys.stdout.flush()
         rssi_valid = False
         t0 = 0
     except KeyboardInterrupt as e:
         break
     except Exception as e2:
         print(e2)
-        break
+        continue
