@@ -95,6 +95,8 @@
 #define ERROR_MLX_SENSOR_FAILED_TO_START 2
 #define ERROR_MLX_SENSOR_ERROR_AFTER_START 3
 #define ERROR_MLX_VALUE_OUT_OF_RANGE 4
+#define ERROR_MLX_SENSOR_ERROR_NEXT_START 5
+#define ERROR_MLX_SENSOR_ERROR_NEXT_READ 6
 
 // Track an average background magnetic field strength.
 // These values are saved in the same units as returned by convertRaw(), but rounded from float
@@ -284,6 +286,8 @@ static void print_sys_state() {
   Serial.print(F(" lastRead=")); Serial.print(SystemStatus.lastTime);
   Serial.print(F(" lastMag=")); Serial.print(SystemStatus.lastMagnitude);
   Serial.print(F(" lastDegC=")); Serial.print(SystemStatus.lastTemperatureC);
+  Serial.print(F(" error=")); Serial.print(SystemStatus.lastErrorCode);
+  Serial.print(F(" mlxFault=")); Serial.print(SystemStatus.mlxFault); 
   Serial.println();
 }
 
@@ -437,7 +441,7 @@ static void next_processing() {
     auto status = MlxSensor.startMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG);
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Cannot measure now!"));
-      SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_AFTER_START;
+      SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_NEXT_START;
       SystemStatus.mlxFault = true;
       return;
     }
@@ -459,7 +463,7 @@ static void next_processing() {
     auto status = MlxSensor.readMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG, raw);
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Cannot read now!"));
-      SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_AFTER_START;
+      SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_NEXT_READ;
       SystemStatus.mlxFault = true;
       return;
     }
@@ -488,22 +492,56 @@ static void next_processing() {
   }
 }
 
+int resetCount = 0;
+elapsedMillis resetPending = 0;
+
 static void serial_debug_terminal() {
-  if (Serial.available()) {
+  while (Serial.available()) {
     auto c = (char) Serial.read();
     switch (c) {
       case 'x':
+        resetCount = 0;
+        print_sys_state();
         print_radio_state();
         print_mlx_state();
-        print_sys_state();
+        break;
+      case 'e':
+        // clear errors
+        Serial.println(F("Clearing MLX error code..."));
+        SystemStatus.systemState = STATE_NORMAL;
+        SystemStatus.lastErrorCode = 0;
+        SystemStatus.pendingSensorReading = false;
+        SystemStatus.pendingTransmission1 = false;
+        break;
+
+      case 'r':
+        // Reset the device...
+        if (resetCount == 0) {
+          resetPending = 0;
+          Serial.println(F("Reset request pending... press r 4 more times in 10 seconds"));
+        }
+        resetCount++;
+        if (resetCount >= 5) {
+          if (resetPending < 10000) {
+            Serial.println(F("Reset requested..."));
+            // reset here...
+          }
+        }
         break;
       default:
+        resetCount = 0;
         break;
     }
   }
 }
 
 void loop() {
+  if (resetCount > 0 && resetPending >= 10000) {
+    Serial.println(F("Reset request timed out..."));
+    resetPending = 0;
+    resetCount = 0;
+  }
+
   bool stateChanged = (SystemStatus.oldState != SystemStatus.systemState);
   if (stateChanged) {
     Serial.print(F("STATE CHANGE "));

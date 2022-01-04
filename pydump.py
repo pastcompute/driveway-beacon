@@ -4,6 +4,8 @@ import time
 import math
 import sys
 
+# strings mlog6.txt|egrep ^data | egrep -v ',7[0-9],[2-4][0-9],79' |grep -v ,8[0-3],[2-4]
+
 ser = serial.Serial('/dev/ttyAMA0', 115200, parity=serial.PARITY_NONE, stopbits=1, rtscts=0, xonxoff=0, timeout=None)
 ser.flushInput()
 
