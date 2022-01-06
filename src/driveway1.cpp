@@ -420,11 +420,13 @@ static void transmit1_start() {
 #endif
   
   digitalWrite(LED2, HIGH);
+  Serial.flush(); // avoid i2c, SPI and serial all at the same time
   SPI.begin();
   if (!Radio.TransmitMessage(packet, 13, false)) {
     // TX TIMEOUT - interrupt bit not set by the predicted toa...
+    Radio.Standby(); // in case...
   }
-  Radio.Standby();
+  // Radio.Standby on success should not be required...
   SPI.end();
 
   //led_short_flash(LED2); // <-- we can't do this it wastes 150ms...
@@ -438,16 +440,18 @@ static void next_processing() {
 
   if (!SystemStatus.pendingSensorReading) {
     // Asynchronously start to read the sensor
+    digitalWrite(LED, HIGH);
     auto status = MlxSensor.startMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG);
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Cannot measure now!"));
       SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_NEXT_START;
       SystemStatus.mlxFault = true;
-      return;
+      return; // LED should stick...
     }
     elapsedMillis started;
     SystemStatus.tSensorReadingRequested = started;
     SystemStatus.pendingSensorReading = true;
+    digitalWrite(LED, LOW);
   }
   // OK, while we are waiting for the next, send of the previous one...
   elapsedMillis t1;
@@ -459,13 +463,16 @@ static void next_processing() {
     SystemStatus.pendingTransmission1 = false;
   }
   if (SystemStatus.pendingSensorReading && SystemStatus.tSensorReadingRequested >= SystemStatus.mlxMinDelayHeuristic) {
+    digitalWrite(LED, HIGH);
     MLX90393::txyzRaw raw;
     auto status = MlxSensor.readMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG, raw);
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Cannot read now!"));
+      // attempt to recover:
+
       SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_NEXT_READ;
       SystemStatus.mlxFault = true;
-      return;
+      return; // LED should stick...
     }
     SystemStatus.pendingSensorReading = false;
     const MLX90393::txyz values = MlxSensor.convertRaw(raw);
@@ -475,6 +482,7 @@ static void next_processing() {
     SystemStatus.lastMagnitude = magnitude;
     SystemStatus.lastTemperatureC = values.t;
     SystemStatus.pendingTransmission1 = true;
+    digitalWrite(LED, LOW);
 #if 1
     // Slow this down so we dont overload the esp01 when attached for debug
     static int counterSer = 0;
@@ -533,6 +541,8 @@ static void serial_debug_terminal() {
   }
 }
 
+elapsedMillis errorBeaconTime = 0;
+
 void loop() {
   if (resetCount > 0 && resetPending >= 10000) {
     Serial.println(F("Reset request timed out..."));
@@ -581,7 +591,17 @@ void loop() {
 
       if (!SystemStatus.radioFault) {
         // We can still broadcast error messages...
-
+        if (errorBeaconTime > 10000) {
+          errorBeaconTime = 0;
+          char packet[16];
+          snprintf(packet, 16, "FAULT,%d", SystemStatus.lastErrorCode);
+          SPI.begin();
+          if (!Radio.TransmitMessage(packet, strlen(packet), false)) {
+            // TX TIMEOUT - interrupt bit not set by the predicted toa...
+          }
+          Radio.Standby();
+          SPI.end();
+        }
         // TODO
       }
       break;
