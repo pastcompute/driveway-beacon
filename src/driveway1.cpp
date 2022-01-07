@@ -287,7 +287,8 @@ static void print_sys_state() {
   Serial.print(F(" lastMag=")); Serial.print(SystemStatus.lastMagnitude);
   Serial.print(F(" lastDegC=")); Serial.print(SystemStatus.lastTemperatureC);
   Serial.print(F(" error=")); Serial.print(SystemStatus.lastErrorCode);
-  Serial.print(F(" mlxFault=")); Serial.print(SystemStatus.mlxFault); 
+  Serial.print(F(" mlxFault=")); Serial.print(SystemStatus.mlxFault);
+  
   Serial.println();
 }
 

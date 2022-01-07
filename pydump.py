@@ -64,7 +64,8 @@ while True:
         counter = int(bytes2[4], 16) + int(bytes2[3], 16) * 256
         ticks10 = int(bytes2[5], 16) + int(bytes2[6], 16) * 256 + int(bytes2[7], 16) * 65536
         magnitude = int(bytes2[8], 16) + int(bytes2[9], 16) * 256
-        tempC = int(bytes2[10], 16)
+        tempC = int(bytes2[10], 16) & 0x3f
+        resetCount = (int(bytes2[10], 16) & 0xc0) >> 6
         baseline = int(bytes2[11], 16)
 
         if t0 > 0:
@@ -76,7 +77,7 @@ while True:
         if not rssi_valid:
             rssi = -1
             snr = -1
-        print("data,%.03f,%s%03d,%d,%d,%d,%d,%d,%s,%s" % (t1, t, ms, counter, ticks10*10, magnitude, tempC, baseline, rssi, snr))
+        print("data,%.03f,%s%03d,%d,%d,%d,%d,%d,%s,%s,%d" % (t1, t, ms, counter, ticks10*10, magnitude, tempC, baseline, rssi, snr, resetCount))
         sys.stdout.flush()
         rssi_valid = False
         t0 = 0

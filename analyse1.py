@@ -46,7 +46,7 @@ st0 = 0
 detection = 0
 successive_det_count = 0
 successive_nodet_count = 0
-
+prior_epoch = 0
 latchPeak = 0
 latchMin = 999999
 latched = False
@@ -71,7 +71,7 @@ def parse_line(line):
     tempC = int(values[6])
 
     global long_sum, long_count, short_sum, short_count, prior_uptime, short_average, st0, prior_short_average
-    global detection, successive_det_count, successive_nodet_count, latched, integral, latchPeak, latchMin, nlatched
+    global detection, successive_det_count, successive_nodet_count, latched, integral, latchPeak, latchMin, nlatched, prior_epoch
 
     if long_count == 0:
         st0 = epoch
@@ -155,9 +155,11 @@ def parse_line(line):
             latchMin = 999999
             latched = False
 
-    if (long_count % 4000) == 0:
+    prior_epoch = epoch
+
+    if (long_count % 60000) == 0:
+        print("Time %d Samples %d Long Average %d Last Short Average %.2f" % (epoch - st0, long_count, long_sum / long_count, short_average))
         pass
-        # print("Time %d Samples %d Long Average %d Last Short Average %.2f" % (epoch - st0, long_count, long_sum / long_count, short_average))
 
 cont = True
 while cont:
@@ -170,6 +172,8 @@ while cont:
 
     if not cont and p2.poll() is not None:
         break
+
+print("Time %d Samples %d Long Average %d Last Short Average %.2f" % (prior_epoch - st0, long_count, long_sum / long_count, short_average))
 
 #df=pd.read_csv(datafile, sep=',', header=None)
 #df.ftypes
