@@ -120,6 +120,8 @@ static struct SystemStatus_t {
   byte systemState;
   byte oldState;
   byte lastErrorCode;
+  byte lastMlxNopCode;
+  int mlxResetCount;
 
   elapsedMillis tLastFaultFlash;
 
@@ -146,6 +148,8 @@ static struct SystemStatus_t {
     systemState(STATE_BOOT),
     oldState(-1),
     lastErrorCode(0),
+    lastMlxNopCode(0),
+    mlxResetCount(0),
     pendingSensorReading(false),
     lastTime(0),
     lastMagnitude(0),
@@ -224,23 +228,29 @@ static void setup_radio() {
   SPI.end();
 }
 
+static void configure_mlx() {
+  Serial.flush();
+  MlxSensor.reset(); // beware, this changes defaults from begin()
+  MlxSensor.setGainSel(7);
+  MlxSensor.setResolution(0, 0, 0);
+  MlxSensor.setOverSampling(3); // increases mindelay
+  MlxSensor.setTemperatureCompensation(0);
+  MlxSensor.setDigitalFiltering(5); // reduces mindelay
+  SystemStatus.lastMlxNopCode = MlxSensor.nop();
+  auto minDelay = MlxSensor.convDelayMillis();
+  SystemStatus.mlxMinDelayHeuristic = (minDelay < 1) ? 1 : minDelay + 10;
+  SystemStatus.mlxFault = false;
+}
+
 static void setup_mlx() {
   if (MLX90393::STATUS_OK != MlxSensor.begin(0, 0)) {
     // try a nop to get the actual status byte
-    auto v = MlxSensor.nop();
+    SystemStatus.lastMlxNopCode = MlxSensor.nop();
     Serial.print(F("Init Fault: MLX90393 "));
-    Serial.println(byte2hex(v));
+    Serial.println(byte2hex(SystemStatus.lastMlxNopCode));
     SystemStatus.mlxFault = false;
   } else {
-    MlxSensor.reset(); // beware, this changes defaults from begin()
-    MlxSensor.setGainSel(7);
-    MlxSensor.setResolution(0, 0, 0);
-    MlxSensor.setOverSampling(3); // increases mindelay
-    MlxSensor.setTemperatureCompensation(0);
-    MlxSensor.setDigitalFiltering(5); // reduces mindelay
-    auto minDelay = MlxSensor.convDelayMillis();
-    SystemStatus.mlxMinDelayHeuristic = (minDelay < 1) ? 1 : minDelay + 10;
-    SystemStatus.mlxFault = false;
+    configure_mlx();
   }
 }
 
@@ -268,11 +278,15 @@ static void print_mlx_state() {
   MlxSensor.getOverSampling(osr);
   MlxSensor.getResolution(rx, ry, rz);
   MlxSensor.getDigitalFiltering(df);
+  byte nop = MlxSensor.nop();
+
   Serial.print(F("MLX90393: minDelayHeur=")); Serial.print(SystemStatus.mlxMinDelayHeuristic);
+  Serial.print(F(" resetCount=")); Serial.print(SystemStatus.mlxResetCount);
   Serial.print(F(" gainSel=")); Serial.print(gainSel);
   Serial.print(F(" hall=")); Serial.print(hall);
   Serial.print(F(" osr=")); Serial.print(osr);
   Serial.print(F(" filter=")); Serial.print(df);
+  Serial.print(F(" nop=")); Serial.print(nop);
   Serial.println();
 }
 
@@ -409,7 +423,7 @@ static void transmit1_start() {
   packet[7] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
   packet[8] = SystemStatus.lastMagnitude & 0xff;
   packet[9] = (SystemStatus.lastMagnitude >> 8) & 0xff;
-  packet[10] = SystemStatus.lastTemperatureC;
+  packet[10] = ((SystemStatus.lastTemperatureC) & 0x3f) | ((SystemStatus.mlxResetCount & 0x3) << 6);
   packet[11] = min(SystemStatus.backgroundInfo.movingAverage, 0xff);
   packet[12] = 0;
 #if 0
@@ -419,7 +433,7 @@ static void transmit1_start() {
   packet[13] = 0; // hack for possibly dodgy rx
 #endif
   
-  digitalWrite(LED2, HIGH);
+  digitalWrite(PIN_LED_XTRA, HIGH);
   Serial.flush(); // avoid i2c, SPI and serial all at the same time
   SPI.begin();
   if (!Radio.TransmitMessage(packet, 13, false)) {
@@ -430,7 +444,7 @@ static void transmit1_start() {
   SPI.end();
 
   //led_short_flash(LED2); // <-- we can't do this it wastes 150ms...
-  digitalWrite(LED2, LOW);
+  digitalWrite(PIN_LED_XTRA, LOW);
 
   counter ++;
 }
@@ -440,18 +454,19 @@ static void next_processing() {
 
   if (!SystemStatus.pendingSensorReading) {
     // Asynchronously start to read the sensor
-    digitalWrite(LED, HIGH);
+    digitalWrite(PIN_LED_MAIN, HIGH);
     auto status = MlxSensor.startMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG);
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Cannot measure now!"));
       SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_NEXT_START;
+      SystemStatus.lastMlxNopCode = MlxSensor.nop();
       SystemStatus.mlxFault = true;
       return; // LED should stick...
     }
     elapsedMillis started;
     SystemStatus.tSensorReadingRequested = started;
     SystemStatus.pendingSensorReading = true;
-    digitalWrite(LED, LOW);
+    digitalWrite(PIN_LED_MAIN, LOW);
   }
   // OK, while we are waiting for the next, send of the previous one...
   elapsedMillis t1;
@@ -463,13 +478,13 @@ static void next_processing() {
     SystemStatus.pendingTransmission1 = false;
   }
   if (SystemStatus.pendingSensorReading && SystemStatus.tSensorReadingRequested >= SystemStatus.mlxMinDelayHeuristic) {
-    digitalWrite(LED, HIGH);
+    digitalWrite(PIN_LED_MAIN, HIGH);
     MLX90393::txyzRaw raw;
     auto status = MlxSensor.readMeasurement(MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG, raw);
     if (status & MLX90393::ERROR_BIT) {
       Serial.println(F("Cannot read now!"));
       // attempt to recover:
-
+      SystemStatus.lastMlxNopCode = MlxSensor.nop();
       SystemStatus.lastErrorCode = ERROR_MLX_SENSOR_ERROR_NEXT_READ;
       SystemStatus.mlxFault = true;
       return; // LED should stick...
@@ -482,7 +497,7 @@ static void next_processing() {
     SystemStatus.lastMagnitude = magnitude;
     SystemStatus.lastTemperatureC = values.t;
     SystemStatus.pendingTransmission1 = true;
-    digitalWrite(LED, LOW);
+    digitalWrite(PIN_LED_MAIN, LOW);
 #if 1
     // Slow this down so we dont overload the esp01 when attached for debug
     static int counterSer = 0;
@@ -511,9 +526,22 @@ static void serial_debug_terminal() {
         print_radio_state();
         print_mlx_state();
         break;
+
       case 'e':
         // clear errors
         Serial.println(F("Clearing MLX error code..."));
+        SystemStatus.mlxFault = false;
+        SystemStatus.systemState = STATE_NORMAL;
+        SystemStatus.lastErrorCode = 0;
+        SystemStatus.pendingSensorReading = false;
+        SystemStatus.pendingTransmission1 = false;
+        break;
+
+      case 'm':
+        // reset the MLX
+        Serial.println(F("Resetting MLX..."));
+        configure_mlx();
+        SystemStatus.mlxResetCount++;
         SystemStatus.systemState = STATE_NORMAL;
         SystemStatus.lastErrorCode = 0;
         SystemStatus.pendingSensorReading = false;
@@ -594,15 +622,26 @@ void loop() {
         if (errorBeaconTime > 10000) {
           errorBeaconTime = 0;
           char packet[16];
-          snprintf(packet, 16, "FAULT,%d", SystemStatus.lastErrorCode);
+          snprintf(packet, sizeof(packet)-1, "FAULT,%d,%d", SystemStatus.lastErrorCode, SystemStatus.lastMlxNopCode);
           SPI.begin();
-          if (!Radio.TransmitMessage(packet, strlen(packet), false)) {
+          // send trailing zero as a defensive hack against intermittent bug where last byte not reeived
+          if (!Radio.TransmitMessage(packet, strlen(packet) + 1, false)) {
             // TX TIMEOUT - interrupt bit not set by the predicted toa...
           }
           Radio.Standby();
           SPI.end();
         }
         // TODO
+      }
+
+      if (SystemStatus.lastErrorCode == ERROR_MLX_SENSOR_ERROR_NEXT_READ || SystemStatus.lastErrorCode == ERROR_MLX_SENSOR_ERROR_NEXT_START) {
+        Serial.println("Attempting automatic reset");
+        configure_mlx();
+        SystemStatus.mlxResetCount++;
+        SystemStatus.systemState = STATE_NORMAL;
+        SystemStatus.lastErrorCode = 0;
+        SystemStatus.pendingSensorReading = false;
+        SystemStatus.pendingTransmission1 = false;
       }
       break;
 
