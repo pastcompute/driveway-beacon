@@ -17,7 +17,7 @@
             "defines": [
                 "ARDUINO=100",
                 "__USES_INITFINI__",
-                "__STATIC_INLINE",
+                "__STATIC_INLINE=",
                 "XMC1100_Q024x0064",
                 "XMC1100_Boot_Kit",
                 "XMC1100_T038x0064",

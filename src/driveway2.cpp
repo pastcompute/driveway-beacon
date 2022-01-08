@@ -15,10 +15,22 @@
 #endif
 #endif
 
+#define VERBOSE 1
+
+#if VERBOSE
+#include <stdio.h>
+#define DEBUG(x ...) { char buf[128]; snprintf(buf, sizeof(buf), x); Serial.print(buf); }
+#else
+#define DEBUG(x ...)
+#endif
+
 #define STRINGIFY(s) STRINGIFY1(s)
 #define STRINGIFY1(s) #s
 
 #if defined(XMC_BOARD)
+
+#include <XMC1100.h>
+
 #define PIN_LED_MAIN    LED_BUILTIN   // Arduino 14
 #define PIN_LED_XTRA    LED2          // Arduino 15
 
@@ -51,19 +63,22 @@
 #define SX1276_RESET_LOW_TIME 10
 #define SX1276_RESET_WAIT_TIME 50
 
-#define SERIAL_BOOT_DELAY_MS 2500
+#define SERIAL_BOOT_DELAY_MS 3500
 #define SHORT_LED_FLASH_MS 150
+
+#define ERROR_BEACON_INTERVAL 1000
+#define ERROR_BEACON_RESET_AFTER 5
 
 #define MEASURE_FLAGS (MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG)
 
 // Set this to true to emulate driveway1, and transmit all frames on radio, in packet compatible with driveway1
-bool modeDebugRadioAllMeasurements = false;
+bool modeDebugRadioAllMeasurements = true;
 
 // Set this to true, to print all frames to serial
-bool modeDebugSerialAllMeasurements = false;
+bool modeDebugSerialAllMeasurements = true;
 
 // Set this to 0, to print all frames, otherwise, 10 to print every 10th, to emulate driveway1, etc.
-int debugSerialSampleFrameInterval = 10;
+int debugSerialSampleFrameInterval = 0; //10;
 
 static SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
 static SX1276Radio Radio(PIN_SX1276_CS, spiSettings, true);
@@ -88,8 +103,9 @@ struct MlxStatus_t
   uint16_t minDelayHeuristic;
   
   elapsedMillis lastRequest;
+  long returnTime;
   bool measurePending;
-  
+
   bool measureValid;
   long lastMeasureValid;
 
@@ -105,6 +121,7 @@ struct MlxStatus_t
     resetCount(0),
     minDelayHeuristic(0),
     measurePending(false),
+    returnTime(0),
     measureValid(false),
     lastMeasureValid(0),
     mlxRequestError(false),
@@ -260,13 +277,17 @@ bool measureMlxRequestIf() {
   if (MlxStatus.measurePending) {
     return false;
   }
+  // DEBUG("measureMlxRequestIf %ld\n\r", (long)MlxStatus.lastRequest);
   // No timing constraint on how soon after a reading we can request again...
-  MlxStatus.lastRequest = 0;
+  // Throw in a short delay so background stuff keeps workig
+  delay(5);
   MLX90393::txyzRaw raw;
+  MlxStatus.returnTime = MlxStatus.lastRequest;
+  MlxStatus.lastRequest = 0;
   auto status = MlxSensor.startMeasurement(MEASURE_FLAGS);
   if (status & MLX90393::ERROR_BIT) {
     MlxStatus.mlxRequestError = true;
-    MlxStatus.lastNopCode = MlxSensor.nop();
+    MlxStatus.lastNopCode = status;
     Serial.println(F("MLX request error"));
   } else {
     MlxStatus.measurePending = true;
@@ -279,12 +300,13 @@ bool measureMlxIf() {
     return false;
   }
   if (MlxStatus.measurePending && (MlxStatus.lastRequest >= MlxStatus.minDelayHeuristic)) {
+    // DEBUG("measureMlxIf %ld %ld %u\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic);
     MLX90393::txyzRaw raw;
     MlxStatus.measureValid = false;
     auto status = MlxSensor.readMeasurement(MEASURE_FLAGS, raw);
     if (status & MLX90393::ERROR_BIT) {
       MlxStatus.mlxReadError = true;
-      MlxStatus.lastNopCode = MlxSensor.nop();
+      MlxStatus.lastNopCode = status;
       Serial.println(F("MLX read error"));
     } else {
       MlxStatus.lastMeasureValid = uptime;
@@ -346,6 +368,7 @@ void transmitDebugCollectionFrame() {
   packet[10] = (t & 0x3f) | ((MlxStatus.resetCount & 0x3) << 6);
   packet[11] = 0;
   packet[12] = 0;
+  // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
   transmitPacket(packet, 13);
   counter ++;
 }
@@ -358,23 +381,60 @@ void printDebugCollectionFrame() {
   Serial.print(','); Serial.print(MlxStatus.mlxValid);
   Serial.print(','); Serial.print(MlxStatus.mlxRequestError);
   Serial.print(','); Serial.print(MlxStatus.mlxReadError);
-  Serial.print(','); Serial.print(MlxStatus.lastRequest - uptime);
   Serial.print(','); Serial.print(MlxStatus.lastNopCode);
   Serial.print(','); Serial.print(MlxStatus.values.x);
   Serial.print(','); Serial.print(MlxStatus.values.y);
   Serial.print(','); Serial.print(MlxStatus.values.z);
   Serial.print(','); Serial.print(MlxStatus.values.t);
   Serial.print(','); Serial.print(MlxStatus.magnitude);
+  Serial.print(F(",sx1276"));
+  Serial.print(','); Serial.print(RadioStatus.sx1276Valid);
   Serial.print(F(",timing"));
+  Serial.print(','); Serial.print(now - MlxStatus.lastRequest); // time of call to requestMeasurement
+  Serial.print(','); Serial.print(MlxStatus.returnTime);        // interval between successive requests (eff. rate)
+  Serial.print(','); Serial.print(MlxStatus.lastMeasureValid);  // time after last success return from readMeasurement
   Serial.println();
 }
 
 bool debugRadioTransmitPending = false;
 elapsedMillis lastErrorBeacon;
 
+void reportFault() {
+  lastErrorBeacon = 0;
+  Serial.print(F("Fault"));
+  Serial.print(','); Serial.print(MlxStatus.lastNopCode, HEX);
+  Serial.print(','); Serial.print(MlxStatus.mlxRequestError, HEX);
+  Serial.print(','); Serial.print(MlxStatus.mlxReadError, HEX);
+  Serial.println();
+  if (RadioStatus.sx1276Valid) {
+    transmitErrorBeacon();
+  }
+  static int errorBeaconCount = 0;
+  if (errorBeaconCount++ > 5) {
+    Serial.println(F("MLX fault - will reset"));
+    NVIC_SystemReset();
+    delay(2000);
+  }
+}
+
 void loop() {
+  // if we got a setup fault, sleep a bit then reset
+  if (!MlxStatus.mlxValid) {
+    Serial.println(F("MLX init fault - will reset shortly"));
+  }
+  if (!MlxStatus.mlxValid || MlxStatus.mlxReadError || MlxStatus.mlxRequestError) {
+    if (lastErrorBeacon > ERROR_BEACON_INTERVAL) {
+      reportFault();
+    } else {
+      // Looks like we always need a delay in the loop if we dont print anything, or things end up hanging...
+      delay(100);
+    }
+    return;
+  }
+
   // We need to interleave requesting and reading the MLX results with transmitting the previous result
   // because both have a time to conclusion
+  // DEBUG("loop %ld\n\r", (long)uptime);
 
   // This will return true if a measurement was requested (or an error occurred) - which it will be if none is pending
   // the question is, should there be a minimum interval between reading and next requests (so far, it appears not)
@@ -384,7 +444,11 @@ void loop() {
   // This will transmit the latest state, at full bore, as long as last request (not reading) succeeded
   // measureValid will be false if request succeeded then reading failed
   if (modeDebugRadioAllMeasurements && MlxStatus.measureValid && debugRadioTransmitPending) {
-    transmitDebugCollectionFrame();
+    if (RadioStatus.sx1276Valid) {
+      transmitDebugCollectionFrame();
+    } else {
+      delay(Radio.PredictTimeOnAir(13) + 8);
+    }
   }
   debugRadioTransmitPending = false;
 
@@ -414,13 +478,7 @@ void loop() {
     newFault = true;
   }
   // if we have an error state, transmit an error beacon at 5 second intervals
-  if (newFault || lastErrorBeacon > 5000) {
-    lastErrorBeacon = 0;
-    transmitErrorBeacon();
-    Serial.print(F("Fault"));
-    Serial.print(','); Serial.print(MlxStatus.lastNopCode, HEX);
-    Serial.print(','); Serial.print(MlxStatus.mlxRequestError, HEX);
-    Serial.print(','); Serial.print(MlxStatus.mlxReadError, HEX);
-    Serial.println();
+  if (newFault) {
+    reportFault();
   }
 }
