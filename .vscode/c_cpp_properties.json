@@ -2,13 +2,17 @@
     "configurations": [
         {
             "name": "Arduino",
+            "forcedInclude": [
+                "~/.platformio/packages/framework-arduino-avr/variants/XMC1100/config/XMC1100_XMC2GO/pins_arduino.h"
+            ],
             "includePath": [
+                "~/.platformio/packages/framework-arduinoxmc/cores/**",
+                "~/.platformio/packages/framework-arduinoxmc/variants/XMC1100/**",
                 "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/**",
                 "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/**",
                 "~/.platformio/packages/framework-arduinoxmc/libraries/**",
-                "~/.platformio/packages/framework-arduinoxmc/cores/**",
-                "~/.platformio/packages/framework-arduinoxmc/variants/XMC1100/**",
-                "${workspaceFolder:xmc1100-driveway-beacon}/lib/**"
+                "${workspaceFolder}/lib/**",
+                "${workspaceFolder}/.pio/libdeps/**"
             ],
             "defines": [
                 "ARDUINO=100",
