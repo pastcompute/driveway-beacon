@@ -5,6 +5,16 @@
 #include "sx1276reg.h"
 #include "sx1276.h"
 
+// Sanity check our pio settings, because unfortunately this affects arduino main cpp
+#ifdef SERIAL_DEBUG
+#ifdef SERIAL_ONBOARD
+#error oops1
+#endif
+#ifdef SERIAL_HOSTPC
+#error oops2
+#endif
+#endif
+
 #define STRINGIFY(s) STRINGIFY1(s)
 #define STRINGIFY1(s) #s
 
@@ -201,7 +211,7 @@ void print_radio_state() {
   Serial.print(F(" fault=")); Serial.print(!RadioStatus.sx1276Valid);
   Serial.print(F(" tune=")); Serial.print(carrier_hz);
   Serial.print(F(" sf=")); Serial.print(sf);
-  Serial.print(F(" toa(13 bytes)=")); Serial.print(Radio.PredictTimeOnAir(13));
+  Serial.print(F(" toa(13)=")); Serial.print(Radio.PredictTimeOnAir(13));
   Serial.println();
 }
 
@@ -305,7 +315,7 @@ bool transmitPacket(const void *payload, byte len) {
 }
 
 void transmitErrorBeacon() {
-  char packet[16];
+  char packet[14];
   // send trailing space as a defensive hack against intermittent bug where last byte not reeived
   snprintf(packet, sizeof(packet), "FAULT,%02x,%d,%d ", MlxStatus.lastNopCode, MlxStatus.mlxRequestError, MlxStatus.mlxReadError);
   SPI.begin();
@@ -318,7 +328,7 @@ void transmitErrorBeacon() {
 
 void transmitDebugCollectionFrame() {
   static long counter = 0;
-  byte packet[16];
+  byte packet[13];
   const long tEvent = MlxStatus.lastMeasureValid / 10;
   const uint16_t m = uint16_t(MlxStatus.magnitude);
   const int t = MlxStatus.values.t;
@@ -395,12 +405,12 @@ void loop() {
   bool newFault = false;
   if (MlxStatus.mlxRequestError && priorRequestError != MlxStatus.mlxRequestError) {
     // we just had a request fail start
-    Serial.println(F("MLX request fault detected"));
+    Serial.println(F("MLX request fault detect"));
     newFault = true;
   }
   if (MlxStatus.mlxReadError && priorReadError != MlxStatus.mlxReadError) {
     // we just had a read fail start
-    Serial.println(F("MLX read fault detected"));
+    Serial.println(F("MLX read fault detect"));
     newFault = true;
   }
   // if we have an error state, transmit an error beacon at 5 second intervals
