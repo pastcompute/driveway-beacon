@@ -72,13 +72,15 @@
 #define MEASURE_FLAGS (MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG)
 
 // Set this to true to emulate driveway1, and transmit all frames on radio, in packet compatible with driveway1
-bool modeDebugRadioAllMeasurements = true;
+bool modeDebugRadioAllMeasurements = false;
 
 // Set this to true, to print all frames to serial
-bool modeDebugSerialAllMeasurements = true;
+bool modeDebugSerialAllMeasurements = false;
 
 // Set this to 0, to print all frames, otherwise, 10 to print every 10th, to emulate driveway1, etc.
 int debugSerialSampleFrameInterval = 0; //10;
+
+#define HEARTBEAT_BEACON_MS 15000
 
 static SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
 static SX1276Radio Radio(PIN_SX1276_CS, spiSettings, true);
@@ -396,8 +398,125 @@ void printDebugCollectionFrame() {
   Serial.println();
 }
 
+struct Detector_t {
+  int idx;
+  int dwellLength;
+  int dwellCount;
+  float dwellAggregate;
+  float lastAverage;
+  float stableAverage;
+
+  int tentativeDetection;
+  int antiDetection;
+  bool detectionInBlock;
+  int samplesSinceDetection;
+
+  Detector_t()
+  : idx(0),
+    dwellLength(22), // ~2 second blocks
+    dwellCount(0),
+    dwellAggregate(0.F),
+    lastAverage(-1.F),
+    stableAverage(-1.F),
+    tentativeDetection(0),
+    antiDetection(0),
+    detectionInBlock(false)
+  { }
+};
+
+#define DETECTOR_VARIANCE_THRESHOLD 4
+Detector_t DetectorStatus;
+
+void stepDetector() {
+  // Algorithm
+  // - non-overlapt "integration" by averaging a block of samples
+  // - if we get a spike above or below the previous average then probably a detection
+  // - alternative - augment using differential instead
+
+  // DEBUG("%d %d\n\r", DetectorStatus.idx, (int)DetectorStatus.dwellAggregate);
+
+  float m = MlxStatus.magnitude;
+  DetectorStatus.idx ++;
+  DetectorStatus.dwellAggregate += m;
+
+  if (DetectorStatus.idx % DetectorStatus.dwellLength == 0) {
+    DetectorStatus.dwellCount ++;
+    if (DetectorStatus.dwellCount < 5) {
+      // Compute a longer average when booted, to stabilise - aggregate over first 5 dwells of ~22 samples (~10 seconds)
+      return;
+    } else {
+      float average = DetectorStatus.dwellAggregate / DetectorStatus.idx;
+      DetectorStatus.lastAverage = average;
+      DetectorStatus.dwellAggregate = 0;
+      DetectorStatus.idx = 0;
+      if (DetectorStatus.stableAverage < 0) {
+        DetectorStatus.stableAverage = average;
+        Serial.print(F("stable-average,"));
+        Serial.print(DetectorStatus.stableAverage);
+        Serial.println();
+        return;
+      }
+      // Update average if there has been no detection in this block
+      if (!DetectorStatus.detectionInBlock) {
+        DetectorStatus.stableAverage = average;
+        Serial.print(F("stable-average,"));
+        Serial.print(DetectorStatus.stableAverage);
+        Serial.println();
+      }
+    }
+  }
+  if (DetectorStatus.stableAverage < 0) { return; }
+  // compare sample against the stable average
+  float variance = fabs(m - DetectorStatus.stableAverage);
+  if (variance >= DETECTOR_VARIANCE_THRESHOLD) {
+    // tentative detection
+    DetectorStatus.tentativeDetection ++;
+    if (DetectorStatus.tentativeDetection == 2) {
+      // detection...
+      // go until a double 0
+      Serial.print(F("Detection-confirmed,"));
+      Serial.print(DetectorStatus.stableAverage);
+      Serial.print(',');
+      Serial.print(m);
+      Serial.println();
+    }
+    if (DetectorStatus.tentativeDetection > 1) {
+      DetectorStatus.antiDetection = 0;
+      DetectorStatus.detectionInBlock = true;
+    }
+  } else {
+    DetectorStatus.antiDetection ++;
+    
+    // Debouncing
+    // We allow ....101 as a detection but not ...100
+    if (DetectorStatus.tentativeDetection == 1 && DetectorStatus.antiDetection > 1) {
+      Serial.println(F("False-alarm"));
+    }
+    if (DetectorStatus.tentativeDetection > 1 && DetectorStatus.antiDetection > 1) {
+      Serial.println(F("Detection-completed"));
+      DetectorStatus.tentativeDetection = 0;
+      DetectorStatus.antiDetection = 0;
+      DetectorStatus.samplesSinceDetection = 0;
+    }
+  }
+  if (DetectorStatus.detectionInBlock && DetectorStatus.tentativeDetection > 0) {
+    Serial.print(F("Det:")); Serial.println(m);
+  }
+  if (DetectorStatus.detectionInBlock) {
+    DetectorStatus.samplesSinceDetection ++;
+  }
+  if (DetectorStatus.samplesSinceDetection > DetectorStatus.dwellLength * 5) {
+    Serial.println(F("Detection-cleared"));
+    DetectorStatus.detectionInBlock = false; // allow stable average to update again after 5 more dwells
+    DetectorStatus.samplesSinceDetection = 0;
+  }
+
+  // TODO: if detection extends for too long, then perhaps the average has changed...
+}
+
 bool debugRadioTransmitPending = false;
 elapsedMillis lastErrorBeacon;
+elapsedMillis lastHeartbeat;
 
 void reportFault() {
   lastErrorBeacon = 0;
@@ -456,6 +575,10 @@ void loop() {
   bool priorReadError = MlxStatus.mlxReadError;
   if (measureMlxIf()) {
     MlxStatus.allFrameCounter ++;
+
+    stepDetector();
+
+
     debugRadioTransmitPending = true;
 
     // print debug to serial, either continuous, or on a sample if we have a constrained debug link like an ESP01
@@ -480,5 +603,15 @@ void loop() {
   // if we have an error state, transmit an error beacon at 5 second intervals
   if (newFault) {
     reportFault();
+    return;
+  }
+  if (lastHeartbeat >= HEARTBEAT_BEACON_MS) {
+    lastHeartbeat = 0;
+    Serial.print("Heartbeat,");
+    Serial.print(DetectorStatus.stableAverage);
+    Serial.print(',');
+    Serial.print(uptime);
+    // todo: stats
+    Serial.println();
   }
 }
