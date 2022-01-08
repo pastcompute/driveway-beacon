@@ -302,7 +302,6 @@ static void print_sys_state() {
   Serial.print(F(" lastDegC=")); Serial.print(SystemStatus.lastTemperatureC);
   Serial.print(F(" error=")); Serial.print(SystemStatus.lastErrorCode);
   Serial.print(F(" mlxFault=")); Serial.print(SystemStatus.mlxFault);
-  
   Serial.println();
 }
 
@@ -621,6 +620,7 @@ void loop() {
       if (!SystemStatus.radioFault) {
         // We can still broadcast error messages...
         if (errorBeaconTime > 10000) {
+          Serial.flush();
           errorBeaconTime = 0;
           char packet[16];
           snprintf(packet, sizeof(packet)-1, "FAULT,%d,%d", SystemStatus.lastErrorCode, SystemStatus.lastMlxNopCode);
