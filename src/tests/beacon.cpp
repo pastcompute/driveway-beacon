@@ -57,14 +57,18 @@
 
 SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0); // double check
 
-SX1276Radio radio(PIN_SX1276_CS, spiSettings);
+const bool inAir9b = true;
+SX1276Radio radio(PIN_SX1276_CS, spiSettings, inAir9b);
 
 bool started_ok = false;
 
 ICACHE_FLASH_ATTR
 void setup()
 {
-  delay(1000); // let last of ESP8266 junk get past
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(5000); // let last of ESP8266 junk get past
+  digitalWrite(LED_BUILTIN, LOW);
   Serial.begin(115200);
   Serial.println();
 
@@ -107,14 +111,16 @@ void setup()
     Serial.println(F("SX1276 init error"));
     // TODO: flash the LED
   } else {
-    radio.SetCarrier(919000000);
+    radio.SetSpreadingFactor(7);
+    radio.SetBandwidth(SX1276_LORA_BW_125000);
+    radio.SetCarrier(920000000);
     uint32_t carrier_hz = 0;
     radio.ReadCarrier(carrier_hz);
     Serial.print(F("Carrier: ")); Serial.println(carrier_hz);
     started_ok = true;
   }
   SPI.end();
-  delay(500);
+  delay(1500);
 }
 
 void go_to_sleep(int ms)
@@ -138,7 +144,7 @@ void loop() {
   if (started_ok) {
     SPI.begin();
     radio.TransmitMessage(buffer, strlen(buffer));
-    radio.Standby();
+    // radio.Standby();
     SPI.end();
     delay(500);
     digitalWrite(PIN_LED4, HIGH);
