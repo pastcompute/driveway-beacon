@@ -30,6 +30,7 @@
 #if defined(XMC_BOARD)
 
 #include <XMC1100.h>
+#include <DeviceControlXMC.h>
 
 #define PIN_LED_MAIN    LED_BUILTIN   // Arduino 14
 #define PIN_LED_XTRA    LED2          // Arduino 15
@@ -54,11 +55,15 @@
 
 #define ICACHE_FLASH_ATTR
 #define BOARD_NAME STRINGIFY(XMC_BOARD)
+
+XMCClass devCtrl;
+
 #else
 #error "Unsupported configuration"
 #endif
 
 #define PIN_LED_TRANSMIT PIN_LED_XTRA
+#define PIN_LED_MLX PIN_LED_MAIN
 
 #define SX1276_RESET_LOW_TIME 10
 #define SX1276_RESET_WAIT_TIME 50
@@ -82,9 +87,10 @@ int debugSerialSampleFrameInterval = 0; //10;
 
 #define HEARTBEAT_BEACON_MS 15000
 
-static SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
-static SX1276Radio Radio(PIN_SX1276_CS, spiSettings, true);
-static MLX90393 MlxSensor;
+SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
+const bool inAir9b = true;
+SX1276Radio Radio(PIN_SX1276_CS, spiSettings, inAir9b);
+MLX90393 MlxSensor;
 
 struct RadioStatus_t
 {
@@ -122,8 +128,8 @@ struct MlxStatus_t
     lastNopCode(0),
     resetCount(0),
     minDelayHeuristic(0),
-    measurePending(false),
     returnTime(0),
+    measurePending(false),
     measureValid(false),
     lastMeasureValid(0),
     mlxRequestError(false),
@@ -143,7 +149,7 @@ void led_reset() {
   digitalWrite(PIN_LED_XTRA, LOW);
 }
 
-void led_short_flash(uint8_t pin = PIN_LED_MAIN) {
+void led_short_flash(uint8_t pin) {
   digitalWrite(pin, HIGH);
   delay(SHORT_LED_FLASH_MS);
   digitalWrite(pin, LOW);
@@ -153,7 +159,7 @@ void led_short_flash(uint8_t pin = PIN_LED_MAIN) {
 void led_five_short_flash() {
   for (int n=0; n < 5; n++) {
     delay(SHORT_LED_FLASH_MS);
-    led_short_flash();
+    led_short_flash(PIN_LED_MAIN);
   }
 }
 
@@ -168,33 +174,36 @@ void reset_radio() {
 void configure_radio() {
   SPI.begin();
   // Just read this once, rather than continuously
-  auto radioVersion = Radio.ReadVersion();
+  RadioStatus.sx1276Version = Radio.ReadVersion();
   if (!Radio.Begin()) {
     Serial.println(F("Init Fault: SX1276"));
   } else {
     // Aim for improved (shorter) ToA
     Radio.SetSpreadingFactor(7);
-    Radio.SetCarrier(920000000);
     Radio.SetBandwidth(SX1276_LORA_BW_125000);
+    Radio.SetCarrier(920000000);
     RadioStatus.sx1276Valid = true;
   }
   SPI.end();
 }
 
 void setup_radio() {
+  Serial.println(F("setup_radio"));
   RadioStatus.sx1276Valid = false;
   pinMode(PIN_SX1276_RST,  OUTPUT);
   pinMode(PIN_SX1276_CS,   OUTPUT);
+  digitalWrite(PIN_SX1276_CS, HIGH);
+  digitalWrite(PIN_SX1276_RST, HIGH);
   digitalWrite(PIN_SX1276_MISO, HIGH);
   digitalWrite(PIN_SX1276_MOSI, HIGH);
   digitalWrite(PIN_SX1276_SCK,  HIGH);
-  digitalWrite(PIN_SX1276_CS, HIGH);
-  digitalWrite(PIN_SX1276_RST, HIGH);
   reset_radio();
   configure_radio();
 }
 
 void configure_mlx() {
+  Serial.println(F("configure_mlx"));
+  pinMode(MLX_IRQ, INPUT_PULLDOWN);
   MlxSensor.reset(); // beware, this changes defaults from begin()
   MlxSensor.setGainSel(7);
   MlxSensor.setResolution(0, 0, 0);
@@ -208,8 +217,9 @@ void configure_mlx() {
 }
 
 static void setup_mlx() {
+  Serial.println(F("setup_mlx"));
   MlxStatus.mlxValid = false;
-  if (MLX90393::STATUS_OK != MlxSensor.begin(0, 0)) {
+  if (MLX90393::STATUS_OK != MlxSensor.begin(0, 0, -1, Wire)) {
     MlxStatus.lastNopCode = MlxSensor.nop();
     Serial.println(F("Init Fault: MLX"));
   } else {
@@ -242,6 +252,7 @@ void print_mlx_state() {
   MlxSensor.getResolution(rx, ry, rz);
   MlxSensor.getDigitalFiltering(df);
   byte nop = MlxSensor.nop();
+  auto mrq = digitalRead(MLX_IRQ);
 
   Serial.print(F("MLX90393:"));
   Serial.print(F(" minDelay'=")); Serial.print(MlxStatus.minDelayHeuristic); 
@@ -250,6 +261,7 @@ void print_mlx_state() {
   Serial.print(F(" osr=")); Serial.print(osr);
   Serial.print(F(" filter=")); Serial.print(df);
   Serial.print(F(" nop=")); Serial.print(nop);
+  Serial.print(F(" mrq=")); Serial.print(nop);
   Serial.println();
 }
 
@@ -279,10 +291,15 @@ bool measureMlxRequestIf() {
   if (MlxStatus.measurePending) {
     return false;
   }
-  // DEBUG("measureMlxRequestIf %ld\n\r", (long)MlxStatus.lastRequest);
   // No timing constraint on how soon after a reading we can request again...
   // Throw in a short delay so background stuff keeps workig
-  delay(5);
+  //delay(5);
+  auto mrq = digitalRead(MLX_IRQ);
+  int tc = 0;
+#if defined(XMC_BOARD)
+  tc = devCtrl.getTemperature();
+#endif
+  //DEBUG("measureMlxRequestIf %ld %d %d\n\r", (long)MlxStatus.lastRequest, mrq, tc);
   MLX90393::txyzRaw raw;
   MlxStatus.returnTime = MlxStatus.lastRequest;
   MlxStatus.lastRequest = 0;
@@ -302,7 +319,8 @@ bool measureMlxIf() {
     return false;
   }
   if (MlxStatus.measurePending && (MlxStatus.lastRequest >= MlxStatus.minDelayHeuristic)) {
-    // DEBUG("measureMlxIf %ld %ld %u\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic);
+    auto mrq = digitalRead(MLX_IRQ);
+    //DEBUG("measureMlxIf %ld %ld %u %d\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic, mrq);
     MLX90393::txyzRaw raw;
     MlxStatus.measureValid = false;
     auto status = MlxSensor.readMeasurement(MEASURE_FLAGS, raw);
@@ -531,12 +549,14 @@ void reportFault() {
   static int errorBeaconCount = 0;
   if (errorBeaconCount++ > 5) {
     Serial.println(F("MLX fault - will reset"));
+#if defined(XMC_BOARD)
     NVIC_SystemReset();
+#endif
     delay(2000);
   }
 }
 
-void loop() {
+void loopErrorHandler() {
   // if we got a setup fault, sleep a bit then reset
   if (!MlxStatus.mlxValid) {
     Serial.println(F("MLX init fault - will reset shortly"));
@@ -545,11 +565,83 @@ void loop() {
     if (lastErrorBeacon > ERROR_BEACON_INTERVAL) {
       reportFault();
     } else {
-      // Looks like we always need a delay in the loop if we dont print anything, or things end up hanging...
-      delay(100);
     }
+    // Looks like we always need a delay in the loop if we dont print anything, or things end up hanging...
+    delay(500);
     return;
   }
+}
+
+void transmitHeartbeat() {
+  static long counter = 0;
+  byte packet[32];
+  const long now = uptime / 1000;
+  const long tEvent = MlxStatus.lastMeasureValid / 10;
+  const uint16_t m = uint16_t(MlxStatus.magnitude);
+  const int t = MlxStatus.values.t;
+  int tc = 0;
+#if defined(XMC_BOARD)
+    tc = devCtrl.getTemperature();
+#endif
+  byte n = 0;
+  packet[n++] = 12;
+  packet[n++] = 0x5f;  // not really sF, but hey
+  packet[n++] = 0xbb;     // this type of message
+  packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 255 packets, just useful for detecting skip
+  packet[n++] = (counter & 0xff);
+  // uptime
+  packet[n++] = now & 0xff;
+  packet[n++] = (now >> 8) & 0xff;
+  packet[n++] = (now >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
+  // last valid measurement
+  packet[n++] = tEvent & 0xff;
+  packet[n++] = (tEvent >> 8) & 0xff;
+  packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
+  // last measurement
+  packet[n++] = m & 0xff;
+  packet[n++] = (m >> 8) & 0xff;
+  packet[n++] = t;
+  packet[n++] = tc;
+  packet[n++] = int(DetectorStatus.stableAverage) & 0xff;
+  packet[n++] = (int(DetectorStatus.stableAverage) >> 8) & 0xff;
+  // TODO time of last detection start/end packet[n++] = t2;
+  packet[n++] = 0;
+  packet[n++] = 0;
+  // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
+  transmitPacket(packet, n);
+  counter ++;
+}
+
+bool heartbeat() {
+  if (lastHeartbeat >= HEARTBEAT_BEACON_MS) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    int tc = 0;
+#if defined(XMC_BOARD)
+    tc = devCtrl.getTemperature();
+#endif
+    lastHeartbeat = 0;
+    Serial.print("Heartbeat,");
+    Serial.print(DetectorStatus.stableAverage);
+    Serial.print(',');
+    Serial.print(uptime);
+    Serial.print(',');
+    Serial.print(MlxStatus.values.t);
+    Serial.print(',');
+    Serial.print(tc);
+    Serial.print(',');
+    Serial.print(vibration);
+    // todo: stats
+    Serial.println();
+    delay(50);
+    digitalWrite(LED_BUILTIN, LOW);
+    transmitHeartbeat();
+    return true;
+  }
+  return false;
+}
+
+void loop() {
+  loopErrorHandler();
 
   // We need to interleave requesting and reading the MLX results with transmitting the previous result
   // because both have a time to conclusion
@@ -562,12 +654,18 @@ void loop() {
 
   // This will transmit the latest state, at full bore, as long as last request (not reading) succeeded
   // measureValid will be false if request succeeded then reading failed
+  bool sentDebugRadioPacket = false;
   if (modeDebugRadioAllMeasurements && MlxStatus.measureValid && debugRadioTransmitPending) {
     if (RadioStatus.sx1276Valid) {
       transmitDebugCollectionFrame();
     } else {
       delay(Radio.PredictTimeOnAir(13) + 8);
     }
+  } else {
+    // prevent overheating due to tight loop
+    // hypothesis - we end up up-rounding the mlx measure interval to tDelay x k
+    //delay(500);
+    sentDebugRadioPacket = true;
   }
   debugRadioTransmitPending = false;
 
@@ -577,7 +675,6 @@ void loop() {
     MlxStatus.allFrameCounter ++;
 
     stepDetector();
-
 
     debugRadioTransmitPending = true;
 
@@ -605,13 +702,9 @@ void loop() {
     reportFault();
     return;
   }
-  if (lastHeartbeat >= HEARTBEAT_BEACON_MS) {
-    lastHeartbeat = 0;
-    Serial.print("Heartbeat,");
-    Serial.print(DetectorStatus.stableAverage);
-    Serial.print(',');
-    Serial.print(uptime);
-    // todo: stats
-    Serial.println();
+  if (!heartbeat()) {
+    if (!sentDebugRadioPacket) {
+      delay(15);
+    }
   }
 }

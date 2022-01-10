@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
+#include "sx1276reg.h"
 #include "sx1276.h"
 
 #define STRINGIFY(s) STRINGIFY1(s)
