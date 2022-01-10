@@ -220,6 +220,20 @@ void configure_mlx() {
 static void setup_mlx() {
   Serial.println(F("setup_mlx"));
   MlxStatus.mlxValid = false;
+
+  Wire.begin();
+  for (byte addr=3; addr < 127; addr++) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Scanning i2c addr %02x", (int)addr);      Serial.println(buf);
+    Wire.beginTransmission(addr);
+    int error = Wire.endTransmission();
+    if (error == 0) {
+      snprintf(buf, sizeof(buf), "i2c device at %02x", (int)addr);
+      Serial.println(buf);
+    }
+  }
+
+
   if (MLX90393::STATUS_OK != MlxSensor.begin(0, 0, -1, Wire)) {
     MlxStatus.lastNopCode = MlxSensor.nop();
     Serial.println(F("Init Fault: MLX"));
