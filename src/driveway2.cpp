@@ -44,6 +44,7 @@
 #define PIN_SDA 11         // hw 11
 #define PIN_SCL 10         // hw 12
 
+#define PIN_VIBRATION   9
 #define MLX_IRQ 9          // hw 15
 #define PWM_OUT 8          // hw 16
 
@@ -265,6 +266,12 @@ void print_mlx_state() {
   Serial.println();
 }
 
+volatile byte vibration = 0;
+
+void vibrationSensorInterruptHandler() {
+  vibration++;
+}
+
 void setup() {
   pinMode(PIN_LED_MAIN, OUTPUT);
   pinMode(PIN_LED_XTRA, OUTPUT);
@@ -279,6 +286,9 @@ void setup() {
   Serial.println(F("SentriFarm Magnetic Field Disruption Probe"));
   Serial.print(F("Device: "));
   Serial.println(F(BOARD_NAME));
+
+  pinMode(PIN_VIBRATION, INPUT_PULLDOWN);
+  attachInterrupt(PIN_VIBRATION, vibrationSensorInterruptHandler, FALLING);
 
   setup_radio();
   print_radio_state();
@@ -657,9 +667,17 @@ bool heartbeat() {
   return false;
 }
 
+byte lastVibration = 0;
+
 void loop() {
   loopErrorHandler();
 
+  byte v = vibration;
+  if (v != lastVibration) {
+    lastVibration = v;
+    Serial.print(F("Vibration...")); Serial.println(v);
+    // TODO - use a latching heuristic, send a message...
+  }
   // We need to interleave requesting and reading the MLX results with transmitting the previous result
   // because both have a time to conclusion
   // DEBUG("loop %ld\n\r", (long)uptime);
