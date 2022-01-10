@@ -509,6 +509,8 @@ void stepDetector() {
     // We allow ....101 as a detection but not ...100
     if (DetectorStatus.tentativeDetection == 1 && DetectorStatus.antiDetection > 1) {
       Serial.println(F("False-alarm"));
+      DetectorStatus.tentativeDetection = 0;
+      DetectorStatus.antiDetection = 0;
     }
     if (DetectorStatus.tentativeDetection > 1 && DetectorStatus.antiDetection > 1) {
       Serial.println(F("Detection-completed"));
@@ -527,6 +529,7 @@ void stepDetector() {
     Serial.println(F("Detection-cleared"));
     DetectorStatus.detectionInBlock = false; // allow stable average to update again after 5 more dwells
     DetectorStatus.samplesSinceDetection = 0;
+    DetectorStatus.tentativeDetection = 0;
   }
 
   // TODO: if detection extends for too long, then perhaps the average has changed...
