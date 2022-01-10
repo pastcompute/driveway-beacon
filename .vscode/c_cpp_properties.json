@@ -14,6 +14,7 @@
                 "ARDUINO=100",
                 "TEENSYDUINO",
                 "KINETISL",
+                "__MK20DX256__",
                 "Serial=Serial1",
                 "F_CPU=48000000"
             ],

@@ -2,6 +2,7 @@
 #include <MLX90393.h>
 #include <elapsedMillis.h>
 #include <SPI.h>
+#include <Wire.h>
 #include "sx1276reg.h"
 #include "sx1276.h"
 
@@ -15,7 +16,7 @@
 #endif
 #endif
 
-#define VERBOSE 1
+#define VERBOSE 0
 
 #if VERBOSE
 #include <stdio.h>
@@ -32,8 +33,8 @@
 #include <XMC1100.h>
 #include <DeviceControlXMC.h>
 
-#define PIN_LED_MAIN    LED_BUILTIN   // Arduino 14
-#define PIN_LED_XTRA    LED2          // Arduino 15
+#define LED_MAIN    LED_BUILTIN   // Arduino 14
+#define LED_XTRA    LED2          // Arduino 15
 
 #define PIN_SX1276_RST  4  // hw 5
 #define PIN_SX1276_CS   3  // hw 4
@@ -62,8 +63,7 @@ XMCClass devCtrl;
 #elif defined(TEENSYDUINO)
 
 #define PIN_VIBRATION   5 // at the moment this is the pin used for DHT which we dont need
-#undef PIN_LED_MAIN
-#undef PIN_LED_XTRA
+#define LED_MAIN LED_BUILTIN
 #define PIN_SX1276_RST  21
 #define PIN_SX1276_MISO PIN_SPI_MISO // 12
 #define PIN_SX1276_MOSI PIN_SPI_MOSI // 11
@@ -85,9 +85,6 @@ XMCClass devCtrl;
 #error "Unsupported configuration"
 #endif
 
-#define PIN_LED_TRANSMIT PIN_LED_XTRA
-#define PIN_LED_MLX PIN_LED_MAIN
-
 #define SX1276_RESET_LOW_TIME 10
 #define SX1276_RESET_WAIT_TIME 50
 
@@ -96,6 +93,8 @@ XMCClass devCtrl;
 
 #define ERROR_BEACON_INTERVAL 1000
 #define ERROR_BEACON_RESET_AFTER 5
+
+#define DETECTOR_VARIANCE_THRESHOLD 4
 
 #define MEASURE_FLAGS (MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG)
 
@@ -109,6 +108,14 @@ bool modeDebugSerialAllMeasurements = false;
 int debugSerialSampleFrameInterval = 0; //10;
 
 #define HEARTBEAT_BEACON_MS 15000
+
+elapsedMillis uptime;
+
+volatile byte vibration = 0;
+
+bool debugRadioTransmitPending = false;
+elapsedMillis lastErrorBeacon;
+elapsedMillis lastHeartbeat;
 
 SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
 const bool inAir9b = true;
@@ -162,36 +169,106 @@ struct MlxStatus_t
   { }
 };
 
+struct Detector_t {
+  int idx;
+  int dwellLength;
+  int dwellCount;
+  float dwellAggregate;
+  float lastAverage;
+  float stableAverage;
+
+  int tentativeDetection;
+  int antiDetection;
+  bool detectionInBlock;
+  int samplesSinceDetection;
+  int continuousDetectingDwells; // used to detect "permanent" background change
+
+  Detector_t()
+  : idx(0),
+    dwellLength(22), // ~2 second blocks
+    dwellCount(0),
+    dwellAggregate(0.F),
+    lastAverage(-1.F),
+    stableAverage(-1.F),
+    tentativeDetection(0),
+    antiDetection(0),
+    detectionInBlock(false),
+    continuousDetectingDwells(0)
+  { }
+};
+
 RadioStatus_t RadioStatus;
 MlxStatus_t MlxStatus;
+Detector_t DetectorStatus;
 
-elapsedMillis uptime;
+template<typename T> T getBoardTemperature() {
+#if defined(XMC_BOARD)
+  return devCtrl.getTemperature();
+#elif defined(TEENSYDUINO)
+  return InternalTemperature.readTemperatureC();
+#else
+  return 0;
+#endif
+}
 
-void led_reset() {
+// For the teensy, we just flash the one LED on a heartbeat only
+// Perhaps it turns out, on the XMC the LED were part of the problem?
+
+void led_mlx(uint8_t val) {
 #if !defined(TEENSYDUINO)
-  digitalWrite(PIN_LED_MAIN, LOW);
-  digitalWrite(PIN_LED_XTRA, LOW);
+  digitalWrite(LED_MAIN, val);
+#endif
+}
+
+void led_tx(uint8_t val) {
+#if !defined(TEENSYDUINO)
+  digitalWrite(LED_XTRA, val);
 #endif
 }
 
 void led_short_flash(uint8_t pin) {
-#if !defined(TEENSYDUINO)
   digitalWrite(pin, HIGH);
   delay(SHORT_LED_FLASH_MS);
   digitalWrite(pin, LOW);
-#endif
 }
 
 // Used at end of boot when serial port is ready, and a second time after first background reading
-void led_five_short_flash() {
-#if !defined(TEENSYDUINO)
+void led_five_short_flash(uint8_t pin) {
   for (int n=0; n < 5; n++) {
     delay(SHORT_LED_FLASH_MS);
-    led_short_flash(PIN_LED_MAIN);
+    led_short_flash(pin);
   }
-#else
-  delay(SHORT_LED_FLASH_MS * 5 * 2);
+}
+
+void setup_led() {
+  pinMode(LED_MAIN, OUTPUT);
+#if defined(XMC_BOARD)
+  // XMC has two LED so we can split them up
+  pinMode(LED_XTRA, OUTPUT);
 #endif
+}
+
+void welcome() {
+  digitalWrite(LED_MAIN, HIGH);
+#if defined(XMC_BOARD)
+  digitalWrite(LED_XTRA, HIGH);
+#endif
+  delay(SERIAL_BOOT_DELAY_MS);
+  digitalWrite(LED_MAIN, LOW);
+#if defined(XMC_BOARD)
+  digitalWrite(LED_XTRA, LOW);
+#endif
+
+  led_five_short_flash(LED_MAIN);
+
+  Serial.begin(115200);
+  Serial.println(F("SentriFarm Magnetic Field Disruption Probe"));
+  Serial.print(F("Device: "));
+  Serial.println(F(BOARD_NAME));
+}
+
+void lets_get_started() {
+  led_five_short_flash(LED_MAIN);
 }
 
 void reset_radio() {
@@ -253,7 +330,6 @@ void configure_mlx() {
 static void setup_mlx() {
   Serial.println(F("setup_mlx"));
   MlxStatus.mlxValid = false;
-
   Wire.begin();
   for (byte addr=3; addr < 127; addr++) {
     char buf[32];
@@ -265,8 +341,6 @@ static void setup_mlx() {
       Serial.println(buf);
     }
   }
-
-
   if (MLX90393::STATUS_OK != MlxSensor.begin(0, 0, -1, Wire)) {
     MlxStatus.lastNopCode = MlxSensor.nop();
     Serial.println(F("Init Fault: MLX"));
@@ -309,39 +383,17 @@ void print_mlx_state() {
   Serial.print(F(" osr=")); Serial.print(osr);
   Serial.print(F(" filter=")); Serial.print(df);
   Serial.print(F(" nop=")); Serial.print(nop);
-  Serial.print(F(" mrq=")); Serial.print(nop);
+  Serial.print(F(" mrq=")); Serial.print(mrq);
   Serial.println();
 }
-
-volatile byte vibration = 0;
 
 void vibrationSensorInterruptHandler() {
   vibration++;
 }
 
 void setup() {
-#if defined(TEENSYDUINO)
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH);
-#else
-  pinMode(PIN_LED_MAIN, OUTPUT);
-  pinMode(PIN_LED_XTRA, OUTPUT);
-  digitalWrite(PIN_LED_MAIN, HIGH);
-  digitalWrite(PIN_LED_XTRA, HIGH);
-#endif
-
-  delay(SERIAL_BOOT_DELAY_MS);
-#if defined(TEENSYDUINO)
-  digitalWrite(LED_BUILTIN, LOW);
-#else
-  led_reset();
-  led_five_short_flash();  
-#endif
-
-  Serial.begin(115200);
-  Serial.println(F("SentriFarm Magnetic Field Disruption Probe"));
-  Serial.print(F("Device: "));
-  Serial.println(F(BOARD_NAME));
+  setup_led();
+  welcome();
 
   pinMode(PIN_VIBRATION, INPUT_PULLDOWN);
   attachInterrupt(PIN_VIBRATION, vibrationSensorInterruptHandler, FALLING);
@@ -352,37 +404,15 @@ void setup() {
   setup_mlx();
   print_mlx_state();
 
-#if defined(TEENSYDUINO)
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(100);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(100);
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(100);
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(100);
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(100);
-  digitalWrite(LED_BUILTIN, LOW);
-#endif
+  lets_get_started();
 }
 
 bool measureMlxRequestIf() {
   if (MlxStatus.measurePending) {
     return false;
   }
-  // No timing constraint on how soon after a reading we can request again...
-  // Throw in a short delay so background stuff keeps workig
-  //delay(5);
-  auto mrq = digitalRead(MLX_IRQ);
-  int tc = 0;
-#if defined(XMC_BOARD)
-  tc = devCtrl.getTemperature();
-#elif defined(TEENSYDUINO)
-  tc = InternalTemperature.readTemperatureC();
-#endif
-  //DEBUG("measureMlxRequestIf %ld %d %d\n\r", (long)MlxStatus.lastRequest, mrq, tc);
-  MLX90393::txyzRaw raw;
+  // Note, we dont have any timing constraints on how soon after a reading we can request again...
+  // DEBUG("measureMlxRequestIf %ld %d %d\n\r", (long)MlxStatus.lastRequest, digitalRead(MLX_IRQ), getBoardTemperature());
   MlxStatus.returnTime = MlxStatus.lastRequest;
   MlxStatus.lastRequest = 0;
   auto status = MlxSensor.startMeasurement(MEASURE_FLAGS);
@@ -401,11 +431,8 @@ bool measureMlxIf() {
     return false;
   }
   if (MlxStatus.measurePending && (MlxStatus.lastRequest >= MlxStatus.minDelayHeuristic)) {
-#if !defined(TEENSYDUINO)
-    digitalWrite(PIN_LED_MLX, HIGH);
-#endif
-    auto mrq = digitalRead(MLX_IRQ);
-    //DEBUG("measureMlxIf %ld %ld %u %d\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic, mrq);
+    led_mlx(HIGH);
+    // DEBUG("measureMlxIf %ld %ld %u %d\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic, digitalRead(MLX_IRQ));
     MLX90393::txyzRaw raw;
     MlxStatus.measureValid = false;
     auto status = MlxSensor.readMeasurement(MEASURE_FLAGS, raw);
@@ -420,9 +447,7 @@ bool measureMlxIf() {
       MlxStatus.measureValid = true;
     }
     MlxStatus.measurePending = false;
-#if !defined(TEENSYDUINO)
-    digitalWrite(PIN_LED_MLX, LOW);
-#endif
+    led_mlx(LOW);
     return true;
   }
   return false;
@@ -430,9 +455,7 @@ bool measureMlxIf() {
 
 bool transmitPacket(const void *payload, byte len) {
   bool ok = false;
-#if !defined(TEENSYDUINO)
-  digitalWrite(PIN_LED_TRANSMIT, HIGH);
-#endif
+  led_tx(HIGH);
   SPI.begin();
   if (!Radio.TransmitMessage(payload, len, false)) {
     // TX TIMEOUT - interrupt bit not set by the predicted toa...
@@ -442,9 +465,7 @@ bool transmitPacket(const void *payload, byte len) {
     ok = true;
   }
   SPI.end();
-#if !defined(TEENSYDUINO)
-  digitalWrite(PIN_LED_TRANSMIT, LOW);
-#endif
+  led_tx(LOW);
   return ok;
 }
 
@@ -462,26 +483,27 @@ void transmitErrorBeacon() {
 
 void transmitDebugCollectionFrame() {
   static long counter = 0;
-  byte packet[13];
+  byte packet[16];
   const long tEvent = MlxStatus.lastMeasureValid / 10;
   const uint16_t m = uint16_t(MlxStatus.magnitude);
   const int t = MlxStatus.values.t;
-  packet[0] = 12;
-  packet[1] = 0x5f;  // not really sF, but hey
-  packet[2] = 1;     // this type of message
-  packet[3] = (counter >> 8) & 0xff; // auto wrap counter @ 65535 packets, just useful for detecting skip
-  packet[4] = (counter & 0xff);
-  packet[5] = tEvent & 0xff;
-  packet[6] = (tEvent >> 8) & 0xff;
-  packet[7] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  packet[8] = m & 0xff;
-  packet[9] = (m >> 8) & 0xff;
+  byte n = 0;
+  packet[n++] = 12;
+  packet[n++] = 0x5f;  // not really sF, but hey
+  packet[n++] = 1;     // this type of message
+  packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 65535 packets, just useful for detecting skip
+  packet[n++] = (counter & 0xff);
+  packet[n++] = tEvent & 0xff;
+  packet[n++] = (tEvent >> 8) & 0xff;
+  packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
+  packet[n++] = m & 0xff;
+  packet[n++] = (m >> 8) & 0xff;
   // Pack temp into 6 bits. We cant handle negative for now, but ths is for development anyway
-  packet[10] = (t & 0x3f) | ((MlxStatus.resetCount & 0x3) << 6);
-  packet[11] = 0;
-  packet[12] = 0;
+  packet[n++] = (t & 0x3f) | ((MlxStatus.resetCount & 0x3) << 6);
+  packet[n++] = 0;
+  packet[n++] = 0;
   // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
-  transmitPacket(packet, 13);
+  transmitPacket(packet, n);
   counter ++;
 }
 
@@ -507,37 +529,6 @@ void printDebugCollectionFrame() {
   Serial.print(','); Serial.print(MlxStatus.lastMeasureValid);  // time after last success return from readMeasurement
   Serial.println();
 }
-
-struct Detector_t {
-  int idx;
-  int dwellLength;
-  int dwellCount;
-  float dwellAggregate;
-  float lastAverage;
-  float stableAverage;
-
-  int tentativeDetection;
-  int antiDetection;
-  bool detectionInBlock;
-  int samplesSinceDetection;
-  int continuousDetectingDwells; // used to detect "permanent" background change
-
-  Detector_t()
-  : idx(0),
-    dwellLength(22), // ~2 second blocks
-    dwellCount(0),
-    dwellAggregate(0.F),
-    lastAverage(-1.F),
-    stableAverage(-1.F),
-    tentativeDetection(0),
-    antiDetection(0),
-    detectionInBlock(false),
-    continuousDetectingDwells(0)
-  { }
-};
-
-#define DETECTOR_VARIANCE_THRESHOLD 4
-Detector_t DetectorStatus;
 
 void stepDetector() {
   // Algorithm
@@ -640,10 +631,6 @@ void stepDetector() {
 
   // TODO: if detection extends for too long, then perhaps the average has changed...
 }
-
-bool debugRadioTransmitPending = false;
-elapsedMillis lastErrorBeacon;
-elapsedMillis lastHeartbeat;
 
 void reportFault() {
   lastErrorBeacon = 0;
@@ -753,11 +740,10 @@ bool heartbeat() {
   return false;
 }
 
-byte lastVibration = 0;
-
 void loop() {
   loopErrorHandler();
 
+  static byte lastVibration = 0;
   byte v = vibration;
   if (v != lastVibration) {
     lastVibration = v;
