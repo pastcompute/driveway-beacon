@@ -11,6 +11,10 @@
 XMCClass devCtrl;
 #endif
 
+#ifdef TEENSYDUINO
+#include <InternalTemperature.h>
+#endif
+
 void setup()
 {
   // initialize LED digital pin as an output.
@@ -31,6 +35,9 @@ void loop()
   int tc = 0;
 #if defined(XMC_BOARD)
   tc = devCtrl.getTemperature();
+#endif
+#ifdef TEENSYDUINO
+  tc = InternalTemperature.readTemperatureC();
 #endif
   Serial.print(F("blink - LED pin ="));
   Serial.print(LED_BUILTIN);

@@ -38,7 +38,7 @@
 #elif defined(TEENSYDUINO)
 #define PIN_LED4         5
 #define PIN_SX1276_RST  21
-#define PIN_SX1276_CS   10
+#define PIN_SX1276_CS   22 // 10
 #define PIN_SX1276_MISO 12
 #define PIN_SX1276_MOSI 11
 #define PIN_SX1276_SCK  14
@@ -53,6 +53,10 @@
 #define ICACHE_FLASH_ATTR
 #else
 #error "Unsupported configuration"
+#endif
+
+#ifdef TEENSYDUINO
+#include <InternalTemperature.h>
 #endif
 
 SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0); // double check
@@ -138,9 +142,13 @@ char buffer[75] = "Hello, World! Hello, World!";
 int sp = strlen(buffer);
 
 void loop() {
-  
+
   snprintf(buffer + sp, sizeof(buffer) - sp, " %d", counter);
+#if !defined(TEENSYDUINO)
   digitalWrite(PIN_LED4, LOW);
+#else
+  digitalWrite(LED_BUILTIN, HIGH);
+#endif
   if (started_ok) {
     SPI.begin();
     radio.TransmitMessage(buffer, strlen(buffer));
@@ -148,11 +156,23 @@ void loop() {
     SPI.end();
     delay(500);
     digitalWrite(PIN_LED4, HIGH);
+#if !defined(TEENSYDUINO)
+    digitalWrite(LED_BUILTIN, LOW);
     go_to_sleep(7500);
+#endif
   } else {
     delay(500);
     digitalWrite(PIN_LED4, HIGH);
+#if !defined(TEENSYDUINO)
+    digitalWrite(LED_BUILTIN, LOW);
+#endif
     delay(500);
   }
+#ifdef TEENSYDUINO
+  delay(500);
+  auto tc = InternalTemperature.readTemperatureC();
+  Serial.println(tc);
+#endif
+
   counter++;
 }

@@ -59,6 +59,28 @@
 
 XMCClass devCtrl;
 
+#elif defined(TEENSYDUINO)
+
+#define PIN_VIBRATION   5 // at the moment this is the pin used for DHT which we dont need
+#undef PIN_LED_MAIN
+#undef PIN_LED_XTRA
+#define PIN_SX1276_RST  21
+#define PIN_SX1276_MISO PIN_SPI_MISO // 12
+#define PIN_SX1276_MOSI PIN_SPI_MOSI // 11
+#define PIN_SX1276_CS   22 // alt pin (PIN_SPI_SS == 10)
+#define PIN_SX1276_SCK  14 // alt pin (PIN_SPI_SCK == 13, == LED_BUILTIN)
+
+#define PIN_SDA PIN_WIRE_SDA // 18
+#define PIN_SCL PIN_WIRE_SCL // 19
+
+#define MLX_IRQ 9
+
+#define ICACHE_FLASH_ATTR
+
+#define BOARD_NAME "TEENSYLC"
+
+#include <InternalTemperature.h>
+
 #else
 #error "Unsupported configuration"
 #endif
@@ -146,22 +168,30 @@ MlxStatus_t MlxStatus;
 elapsedMillis uptime;
 
 void led_reset() {
+#if !defined(TEENSYDUINO)
   digitalWrite(PIN_LED_MAIN, LOW);
   digitalWrite(PIN_LED_XTRA, LOW);
+#endif
 }
 
 void led_short_flash(uint8_t pin) {
+#if !defined(TEENSYDUINO)
   digitalWrite(pin, HIGH);
   delay(SHORT_LED_FLASH_MS);
   digitalWrite(pin, LOW);
+#endif
 }
 
 // Used at end of boot when serial port is ready, and a second time after first background reading
 void led_five_short_flash() {
+#if !defined(TEENSYDUINO)
   for (int n=0; n < 5; n++) {
     delay(SHORT_LED_FLASH_MS);
     led_short_flash(PIN_LED_MAIN);
   }
+#else
+  delay(SHORT_LED_FLASH_MS * 5 * 2);
+#endif
 }
 
 void reset_radio() {
@@ -193,6 +223,9 @@ void setup_radio() {
   RadioStatus.sx1276Valid = false;
   pinMode(PIN_SX1276_RST,  OUTPUT);
   pinMode(PIN_SX1276_CS,   OUTPUT);
+#if defined(TEENSYDUINO)
+  SPI.setSCK(PIN_SX1276_SCK);
+#endif
   digitalWrite(PIN_SX1276_CS, HIGH);
   digitalWrite(PIN_SX1276_RST, HIGH);
   digitalWrite(PIN_SX1276_MISO, HIGH);
@@ -287,14 +320,23 @@ void vibrationSensorInterruptHandler() {
 }
 
 void setup() {
+#if defined(TEENSYDUINO)
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+#else
   pinMode(PIN_LED_MAIN, OUTPUT);
   pinMode(PIN_LED_XTRA, OUTPUT);
   digitalWrite(PIN_LED_MAIN, HIGH);
   digitalWrite(PIN_LED_XTRA, HIGH);
+#endif
 
   delay(SERIAL_BOOT_DELAY_MS);
+#if defined(TEENSYDUINO)
+  digitalWrite(LED_BUILTIN, LOW);
+#else
   led_reset();
   led_five_short_flash();  
+#endif
 
   Serial.begin(115200);
   Serial.println(F("SentriFarm Magnetic Field Disruption Probe"));
@@ -309,6 +351,20 @@ void setup() {
 
   setup_mlx();
   print_mlx_state();
+
+#if defined(TEENSYDUINO)
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(100);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(100);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(100);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(100);
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(100);
+  digitalWrite(LED_BUILTIN, LOW);
+#endif
 }
 
 bool measureMlxRequestIf() {
@@ -322,6 +378,8 @@ bool measureMlxRequestIf() {
   int tc = 0;
 #if defined(XMC_BOARD)
   tc = devCtrl.getTemperature();
+#elif defined(TEENSYDUINO)
+  tc = InternalTemperature.readTemperatureC();
 #endif
   //DEBUG("measureMlxRequestIf %ld %d %d\n\r", (long)MlxStatus.lastRequest, mrq, tc);
   MLX90393::txyzRaw raw;
@@ -343,6 +401,9 @@ bool measureMlxIf() {
     return false;
   }
   if (MlxStatus.measurePending && (MlxStatus.lastRequest >= MlxStatus.minDelayHeuristic)) {
+#if !defined(TEENSYDUINO)
+    digitalWrite(PIN_LED_MLX, HIGH);
+#endif
     auto mrq = digitalRead(MLX_IRQ);
     //DEBUG("measureMlxIf %ld %ld %u %d\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic, mrq);
     MLX90393::txyzRaw raw;
@@ -359,6 +420,9 @@ bool measureMlxIf() {
       MlxStatus.measureValid = true;
     }
     MlxStatus.measurePending = false;
+#if !defined(TEENSYDUINO)
+    digitalWrite(PIN_LED_MLX, LOW);
+#endif
     return true;
   }
   return false;
@@ -366,7 +430,9 @@ bool measureMlxIf() {
 
 bool transmitPacket(const void *payload, byte len) {
   bool ok = false;
+#if !defined(TEENSYDUINO)
   digitalWrite(PIN_LED_TRANSMIT, HIGH);
+#endif
   SPI.begin();
   if (!Radio.TransmitMessage(payload, len, false)) {
     // TX TIMEOUT - interrupt bit not set by the predicted toa...
@@ -376,7 +442,9 @@ bool transmitPacket(const void *payload, byte len) {
     ok = true;
   }
   SPI.end();
+#if !defined(TEENSYDUINO)
   digitalWrite(PIN_LED_TRANSMIT, LOW);
+#endif
   return ok;
 }
 
@@ -623,6 +691,8 @@ void transmitHeartbeat() {
   int tc = 0;
 #if defined(XMC_BOARD)
     tc = devCtrl.getTemperature();
+#elif defined(TEENSYDUINO)
+    tc = InternalTemperature.readTemperatureC();
 #endif
   byte n = 0;
   packet[n++] = 12;
@@ -659,6 +729,8 @@ bool heartbeat() {
     int tc = 0;
 #if defined(XMC_BOARD)
     tc = devCtrl.getTemperature();
+#elif defined(TEENSYDUINO)
+    tc = InternalTemperature.readTemperatureC();
 #endif
     lastHeartbeat = 0;
     Serial.print("Heartbeat,");

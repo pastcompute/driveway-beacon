@@ -1,7 +1,29 @@
 {
     "configurations": [
         {
-            "name": "Arduino",
+            "name": "Arduino-teensy",
+            "includePath": [
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/**",
+                "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/**",
+                "~/.platformio/packages/framework-arduinoteensy/cores/**",
+                "~/.platformio/packages/framework-arduinoteensy/libraries/**",
+                "${workspaceFolder}/lib/**",
+                "${workspaceFolder}/.pio/libdeps/**"
+            ],
+            "defines": [
+                "ARDUINO=100",
+                "TEENSYDUINO",
+                "KINETISL",
+                "Serial=Serial1",
+                "F_CPU=48000000"
+            ],
+            "compilerPath": "~/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-gcc",
+            "cStandard": "c99",
+            "cppStandard": "gnu++11",
+            "intelliSenseMode": "linux-gcc-arm"
+        },
+        {
+            "name": "Arduino-xmc",
             "forcedInclude": [
                 "~/.platformio/packages/framework-arduino-avr/variants/XMC1100/config/XMC1100_XMC2GO/pins_arduino.h"
             ],
