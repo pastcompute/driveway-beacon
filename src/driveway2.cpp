@@ -428,6 +428,7 @@ struct Detector_t {
   int antiDetection;
   bool detectionInBlock;
   int samplesSinceDetection;
+  int continuousDetectingDwells; // used to detect "permanent" background change
 
   Detector_t()
   : idx(0),
@@ -438,7 +439,8 @@ struct Detector_t {
     stableAverage(-1.F),
     tentativeDetection(0),
     antiDetection(0),
-    detectionInBlock(false)
+    detectionInBlock(false),
+    continuousDetectingDwells(0)
   { }
 };
 
@@ -480,6 +482,17 @@ void stepDetector() {
         Serial.print(F("stable-average,"));
         Serial.print(DetectorStatus.stableAverage);
         Serial.println();
+      } else {
+        DetectorStatus.continuousDetectingDwells ++;
+        if (DetectorStatus.continuousDetectingDwells > 20) {
+          // est. 3 minutes...
+          Serial.print(F("Extended detection period... update stable background"));
+          DetectorStatus.stableAverage = average;
+          Serial.print(F("new-stable-average,"));
+          Serial.print(DetectorStatus.stableAverage);
+          Serial.println();
+          DetectorStatus.continuousDetectingDwells = 0;
+        }
       }
     }
   }
@@ -497,6 +510,7 @@ void stepDetector() {
       Serial.print(',');
       Serial.print(m);
       Serial.println();
+      DetectorStatus.continuousDetectingDwells ++;
     }
     if (DetectorStatus.tentativeDetection > 1) {
       DetectorStatus.antiDetection = 0;
