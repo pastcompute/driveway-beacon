@@ -572,14 +572,14 @@ void printDebugCollectionFrame() {
   Serial.println();
 }
 
-void stepDetector() {
+bool stepDetector() {
   // Algorithm
   // - non-overlapt "integration" by averaging a block of samples
   // - if we get a spike above or below the previous average then probably a detection
   // - alternative - augment using differential instead
 
   // DEBUG("%d %d\n\r", DetectorStatus.idx, (int)DetectorStatus.dwellAggregate);
-
+  bool transmitted = false;
   float m = MlxStatus.magnitude;
   DetectorStatus.idx ++;
   DetectorStatus.dwellAggregate += m;
@@ -588,7 +588,7 @@ void stepDetector() {
     DetectorStatus.dwellCount ++;
     if (DetectorStatus.dwellCount < 5) {
       // Compute a longer average when booted, to stabilise - aggregate over first 5 dwells of ~22 samples (~10 seconds)
-      return;
+      return false;
     } else {
       float average = DetectorStatus.dwellAggregate / DetectorStatus.idx;
       DetectorStatus.recentAverage = average;
@@ -599,7 +599,7 @@ void stepDetector() {
         Serial.print(F("stable-average,"));
         Serial.print(DetectorStatus.stableAverage);
         Serial.println();
-        return;
+        return false;
       }
       // Update average if there has been no detection in this block
       if (!DetectorStatus.detectionInBlock) {
@@ -621,7 +621,7 @@ void stepDetector() {
       }
     }
   }
-  if (DetectorStatus.stableAverage < 0) { return; }
+  if (DetectorStatus.stableAverage < 0) { return false; }
   // compare sample against the stable average
   float variance = fabs(m - DetectorStatus.stableAverage);
   if (variance >= DETECTOR_VARIANCE_THRESHOLD) {
@@ -666,7 +666,8 @@ void stepDetector() {
     DetectorStatus.variationIntegral += m;
     Serial.print(F("Det:")); Serial.print(m);
     Serial.print(F(", Int:")); Serial.println(DetectorStatus.variationIntegral);
-    transmitDetection();
+    // schedule this outside... transmitDetection();
+    transmitted = true; // indicate to loop to not call delay()
   }
   if (DetectorStatus.detectionInBlock) {
     DetectorStatus.samplesSinceDetection ++;
@@ -676,9 +677,9 @@ void stepDetector() {
     DetectorStatus.detectionInBlock = false; // allow stable average to update again after 5 more dwells
     DetectorStatus.samplesSinceDetection = 0;
     DetectorStatus.tentativeDetection = 0;
+    transmitted = false;
   }
-
-  // TODO: if detection extends for too long, then perhaps the average has changed...
+  return transmitted;
 }
 
 void reportFault() {
@@ -792,6 +793,8 @@ bool heartbeat() {
 void loop() {
   loopErrorHandler();
 
+  bool transmitted = false;
+
   static byte lastVibration = 0;
   byte v = vibration;
   if (v != lastVibration) {
@@ -831,7 +834,10 @@ void loop() {
     MlxStatus.allFrameCounter ++;
 
     //elapsedMillis t0;
-    stepDetector();
+    transmitted = stepDetector();
+    if (transmitted) {
+      transmitDetection(); // TODO - work out why this is slowing the loop
+    }
     //Serial.println(t0);
 
     debugRadioTransmitPending = true;
@@ -860,9 +866,11 @@ void loop() {
     reportFault();
     return;
   }
-  if (!heartbeat()) {
+  if (!transmitted && !heartbeat()) {
     if (!sentDebugRadioPacket) {
-      delay(15);
+      if (MlxStatus.lastRequest + 15 < MlxStatus.minDelayHeuristic) {
+        delay(15);
+      }
     }
   }
 }
