@@ -38,6 +38,8 @@ bool debugRadioTransmitPending = false;
 elapsedMillis lastErrorBeacon;
 elapsedMillis lastHeartbeat;
 
+DetectorModel Detector;
+
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
 
@@ -155,7 +157,7 @@ void setup() {
 
   lets_get_started();
 
-  DetectorStatus.threshold = DETECTOR_VARIANCE_THRESHOLD;
+  Detector.setThreshold(DETECTOR_VARIANCE_THRESHOLD);
 }
 
 bool measureMlxRequestIf() {
@@ -263,11 +265,11 @@ void transmitDetection() {
   static long counter = 0;
   byte packet[17];
   byte n = 0;
-  uint32_t tEvent = DetectorStatus.lastDetectionStart / 10;
-  uint16_t duration = DetectorStatus.lastDetectionDuration / 100;
-  uint16_t var = min(65535, DetectorStatus.variationIntegral);
-  uint16_t stable = DetectorStatus.stableAverage;
-  uint16_t id = DetectorStatus.id;
+  uint32_t tEvent = Detector.getLastDetectionStart() / 10;
+  uint16_t duration = Detector.getLastDetectionDuration() / 100;
+  uint16_t var = min(65535, Detector.getDetectionIntegral());
+  uint16_t stable = Detector.getStableAverage();
+  uint16_t id = Detector.getLastId();
   packet[n++] = 12;
   packet[n++] = 0x5f;  // not really sF, but hey
   packet[n++] = 2;     // this type of message
@@ -356,6 +358,7 @@ void transmitHeartbeat() {
   const long tEvent = MlxStatus.lastMeasureValid / 10;
   const uint16_t m = uint16_t(MlxStatus.magnitude);
   const int t = MlxStatus.values.t;
+  const int stable = Detector.getStableAverage();
   int tc = 0;
 #if defined(XMC_BOARD)
     tc = devCtrl.getTemperature();
@@ -381,8 +384,8 @@ void transmitHeartbeat() {
   packet[n++] = (m >> 8) & 0xff;
   packet[n++] = t;
   packet[n++] = tc;
-  packet[n++] = int(DetectorStatus.stableAverage) & 0xff;
-  packet[n++] = (int(DetectorStatus.stableAverage) >> 8) & 0xff;
+  packet[n++] = stable & 0xff;
+  packet[n++] = (stable >> 8) & 0xff;
   // TODO time of last detection start/end packet[n++] = t2;
   packet[0] = n;
   packet[n++] = 0;
@@ -402,7 +405,7 @@ bool heartbeat() {
 #endif
     lastHeartbeat = 0;
     Serial.print("Heartbeat,");
-    Serial.print(DetectorStatus.stableAverage);
+    Serial.print(Detector.getStableAverage());
     Serial.print(',');
     Serial.print(uptime);
     Serial.print(',');
@@ -465,7 +468,7 @@ void loop() {
     MlxStatus.allFrameCounter ++;
 
     //elapsedMillis t0;
-    transmitted = stepDetector();
+    transmitted = Detector.next();
     if (transmitted) {
       transmitDetection(); // TODO - work out why this is slowing the loop
     }

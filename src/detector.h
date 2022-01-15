@@ -3,8 +3,8 @@
 
 extern elapsedMillis uptime;
 
-
-struct Detector_t {
+class DetectorModel {
+private:
   int idx;
   int threshold;
   uint16_t dwellLength;
@@ -25,7 +25,17 @@ struct Detector_t {
 
   bool detectionInBlock;
 
-  Detector_t()
+public:
+  long getLastDetectionStart() const { return lastDetectionStart; } 
+  uint16_t getLastDetectionDuration() const { return lastDetectionDuration; }
+  float getDetectionIntegral() const { return variationIntegral; }
+  uint16_t getStableAverage() const { return stableAverage; }
+  uint16_t getLastId() const { return id; }
+
+  bool next();
+  void setThreshold(int threshold) { this->threshold = threshold; }
+
+  DetectorModel()
   : idx(0),
     threshold(1),
     dwellLength(22), // ~2 second blocks
@@ -44,113 +54,111 @@ struct Detector_t {
   { }
 };
 
-Detector_t DetectorStatus;
-
-bool stepDetector() {
+bool DetectorModel::next() {
   // Algorithm
   // - non-overlapt "integration" by averaging a block of samples
   // - if we get a spike above or below the previous average then probably a detection
   // - alternative - augment using differential instead
 
-  // DEBUG("%d %d\n\r", DetectorStatus.idx, (int)DetectorStatus.dwellAggregate);
+  // DEBUG("%d %d\n\r", this->idx, (int)this->dwellAggregate);
   bool transmitted = false;
   float m = MlxStatus.magnitude;
-  DetectorStatus.idx ++;
-  DetectorStatus.dwellAggregate += m;
+  this->idx ++;
+  this->dwellAggregate += m;
 
-  if (DetectorStatus.idx % DetectorStatus.dwellLength == 0) {
-    DetectorStatus.dwellCount ++;
-    if (DetectorStatus.dwellCount < 5) {
+  if (this->idx % this->dwellLength == 0) {
+    this->dwellCount ++;
+    if (this->dwellCount < 5) {
       // Compute a longer average when booted, to stabilise - aggregate over first 5 dwells of ~22 samples (~10 seconds)
       return false;
     } else {
-      float average = DetectorStatus.dwellAggregate / DetectorStatus.idx;
-      DetectorStatus.recentAverage = average;
-      DetectorStatus.dwellAggregate = 0;
-      DetectorStatus.idx = 0;
-      if (DetectorStatus.stableAverage < 0) {
-        DetectorStatus.stableAverage = average;
+      float average = this->dwellAggregate / this->idx;
+      this->recentAverage = average;
+      this->dwellAggregate = 0;
+      this->idx = 0;
+      if (this->stableAverage < 0) {
+        this->stableAverage = average;
         Serial.print(F("stable-average,"));
-        Serial.print(DetectorStatus.stableAverage);
+        Serial.print(this->stableAverage);
         Serial.println();
         return false;
       }
       // Update average if there has been no detection in this block
-      if (!DetectorStatus.detectionInBlock) {
-        DetectorStatus.stableAverage = average;
+      if (!this->detectionInBlock) {
+        this->stableAverage = average;
         Serial.print(F("stable-average,"));
-        Serial.print(DetectorStatus.stableAverage);
+        Serial.print(this->stableAverage);
         Serial.println();
       } else {
-        DetectorStatus.continuousDetectingDwells ++;
-        if (DetectorStatus.continuousDetectingDwells > 20) {
+        this->continuousDetectingDwells ++;
+        if (this->continuousDetectingDwells > 20) {
           // est. 3 minutes...
           Serial.print(F("Extended detection period... update stable background"));
-          DetectorStatus.stableAverage = average;
+          this->stableAverage = average;
           Serial.print(F("new-stable-average,"));
-          Serial.print(DetectorStatus.stableAverage);
+          Serial.print(this->stableAverage);
           Serial.println();
-          DetectorStatus.continuousDetectingDwells = 0;
+          this->continuousDetectingDwells = 0;
         }
       }
     }
   }
-  if (DetectorStatus.stableAverage < 0) { return false; }
+  if (this->stableAverage < 0) { return false; }
   // compare sample against the stable average
-  float variance = fabs(m - DetectorStatus.stableAverage);
-  if (variance >= DetectorStatus.threshold) {
+  float variance = fabs(m - this->stableAverage);
+  if (variance >= this->threshold) {
     // tentative detection
-    DetectorStatus.tentativeDetection ++;
-    if (DetectorStatus.tentativeDetection == 2) {
+    this->tentativeDetection ++;
+    if (this->tentativeDetection == 2) {
       // detection...
       // go until a double 0
       Serial.print(F("Detection-confirmed,"));
-      Serial.print(DetectorStatus.stableAverage);
+      Serial.print(this->stableAverage);
       Serial.print(',');
       Serial.print(m);
       Serial.println();
-      DetectorStatus.id ++;
-      DetectorStatus.lastDetectionStart = uptime;
-      DetectorStatus.continuousDetectingDwells ++;
-      DetectorStatus.variationIntegral = 0;
+      this->id ++;
+      this->lastDetectionStart = uptime;
+      this->continuousDetectingDwells ++;
+      this->variationIntegral = 0;
     }
-    if (DetectorStatus.tentativeDetection > 1) {
-      DetectorStatus.antiDetection = 0;
-      DetectorStatus.detectionInBlock = true;
+    if (this->tentativeDetection > 1) {
+      this->antiDetection = 0;
+      this->detectionInBlock = true;
     }
   } else {
-    DetectorStatus.antiDetection ++;
+    this->antiDetection ++;
     
     // Debouncing
     // We allow ....101 as a detection but not ...100
-    if (DetectorStatus.tentativeDetection == 1 && DetectorStatus.antiDetection > 1) {
+    if (this->tentativeDetection == 1 && this->antiDetection > 1) {
       Serial.println(F("False-alarm"));
-      DetectorStatus.tentativeDetection = 0;
-      DetectorStatus.antiDetection = 0;
+      this->tentativeDetection = 0;
+      this->antiDetection = 0;
     }
-    else if (DetectorStatus.tentativeDetection > 1 && DetectorStatus.antiDetection > 1) {
+    else if (this->tentativeDetection > 1 && this->antiDetection > 1) {
       Serial.println(F("Detection-completed"));
-      DetectorStatus.lastDetectionDuration = uptime - DetectorStatus.lastDetectionStart;
-      DetectorStatus.tentativeDetection = 0;
-      DetectorStatus.antiDetection = 0;
-      DetectorStatus.samplesSinceDetection = 0;
+      this->lastDetectionDuration = uptime - this->lastDetectionStart;
+      this->tentativeDetection = 0;
+      this->antiDetection = 0;
+      this->samplesSinceDetection = 0;
     }
   }
-  if (DetectorStatus.detectionInBlock && DetectorStatus.tentativeDetection > 0) {
-    DetectorStatus.variationIntegral += m;
+  if (this->detectionInBlock && this->tentativeDetection > 0) {
+    this->variationIntegral += m;
     Serial.print(F("Det:")); Serial.print(m);
-    Serial.print(F(", Int:")); Serial.println(DetectorStatus.variationIntegral);
+    Serial.print(F(", Int:")); Serial.println(this->variationIntegral);
     // schedule this outside... transmitDetection();
     transmitted = true; // indicate to loop to not call delay()
   }
-  if (DetectorStatus.detectionInBlock) {
-    DetectorStatus.samplesSinceDetection ++;
+  if (this->detectionInBlock) {
+    this->samplesSinceDetection ++;
   }
-  if (DetectorStatus.samplesSinceDetection > DetectorStatus.dwellLength * 5) {
+  if (this->samplesSinceDetection > this->dwellLength * 5) {
     Serial.println(F("Detection-cleared"));
-    DetectorStatus.detectionInBlock = false; // allow stable average to update again after 5 more dwells
-    DetectorStatus.samplesSinceDetection = 0;
-    DetectorStatus.tentativeDetection = 0;
+    this->detectionInBlock = false; // allow stable average to update again after 5 more dwells
+    this->samplesSinceDetection = 0;
+    this->tentativeDetection = 0;
     transmitted = false;
   }
   return transmitted;
