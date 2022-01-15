@@ -2,12 +2,16 @@
     "configurations": [
         {
             "name": "Arduino-teensy",
+            "forcedInclude": [
+                "~/.platformio/packages/framework-arduinoteensy/cores/teensy/Arduino.h"
+            ],
             "includePath": [
                 "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/**",
                 "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/**",
                 "~/.platformio/packages/framework-arduinoteensy/cores/**",
                 "~/.platformio/packages/framework-arduinoteensy/libraries/**",
                 "${workspaceFolder}/lib/**",
+                "${workspaceFolder}/include/**",
                 "${workspaceFolder}/.pio/libdeps/**"
             ],
             "defines": [
