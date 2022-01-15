@@ -171,29 +171,39 @@ struct MlxStatus_t
 
 struct Detector_t {
   int idx;
-  int dwellLength;
-  int dwellCount;
+  uint16_t dwellLength;
+  uint16_t dwellCount;
   float dwellAggregate;
-  float lastAverage;
+  float recentAverage;
   float stableAverage;
 
-  int tentativeDetection;
-  int antiDetection;
+  uint16_t tentativeDetection;
+  uint16_t antiDetection;
+  uint16_t samplesSinceDetection;
+  uint16_t continuousDetectingDwells; // used to detect "permanent" background change
+
+  uint16_t id;
+  long lastDetectionStart;
+  uint16_t lastDetectionDuration;
+  float variationIntegral;
+
   bool detectionInBlock;
-  int samplesSinceDetection;
-  int continuousDetectingDwells; // used to detect "permanent" background change
 
   Detector_t()
   : idx(0),
     dwellLength(22), // ~2 second blocks
     dwellCount(0),
     dwellAggregate(0.F),
-    lastAverage(-1.F),
+    recentAverage(-1.F),
     stableAverage(-1.F),
     tentativeDetection(0),
     antiDetection(0),
-    detectionInBlock(false),
-    continuousDetectingDwells(0)
+    continuousDetectingDwells(0),
+    id(0),
+    lastDetectionStart(0),
+    lastDetectionDuration(0),
+    variationIntegral(0.F),
+    detectionInBlock(false)
   { }
 };
 
@@ -501,8 +511,40 @@ void transmitDebugCollectionFrame() {
   // Pack temp into 6 bits. We cant handle negative for now, but ths is for development anyway
   packet[n++] = (t & 0x3f) | ((MlxStatus.resetCount & 0x3) << 6);
   packet[n++] = 0;
+  packet[0] = n;
   packet[n++] = 0;
   // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
+  transmitPacket(packet, n);
+  counter ++;
+}
+
+void transmitDetection() {
+  static long counter = 0;
+  byte packet[17];
+  byte n = 0;
+  uint32_t tEvent = DetectorStatus.lastDetectionStart / 10;
+  uint16_t duration = DetectorStatus.lastDetectionDuration / 100;
+  uint16_t var = min(65535, DetectorStatus.variationIntegral);
+  uint16_t stable = DetectorStatus.stableAverage;
+  uint16_t id = DetectorStatus.id;
+  packet[n++] = 12;
+  packet[n++] = 0x5f;  // not really sF, but hey
+  packet[n++] = 2;     // this type of message
+  packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 65535 packets, just useful for detecting skip
+  packet[n++] = (counter & 0xff);
+  packet[n++] = tEvent & 0xff;
+  packet[n++] = (tEvent >> 8) & 0xff;
+  packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
+  packet[n++] = (id >> 8) & 0xff;
+  packet[n++] = id & 0xff;
+  packet[n++] = (duration >> 8) & 0xff;
+  packet[n++] = duration & 0xff;
+  packet[n++] = (stable >> 8) & 0xff;
+  packet[n++] = stable & 0xff;
+  packet[n++] = (var >> 8) & 0xff;
+  packet[n++] = var & 0xff;
+  packet[0] = n;
+  packet[n++] = 0;
   transmitPacket(packet, n);
   counter ++;
 }
@@ -549,7 +591,7 @@ void stepDetector() {
       return;
     } else {
       float average = DetectorStatus.dwellAggregate / DetectorStatus.idx;
-      DetectorStatus.lastAverage = average;
+      DetectorStatus.recentAverage = average;
       DetectorStatus.dwellAggregate = 0;
       DetectorStatus.idx = 0;
       if (DetectorStatus.stableAverage < 0) {
@@ -593,7 +635,10 @@ void stepDetector() {
       Serial.print(',');
       Serial.print(m);
       Serial.println();
+      DetectorStatus.id ++;
+      DetectorStatus.lastDetectionStart = uptime;
       DetectorStatus.continuousDetectingDwells ++;
+      DetectorStatus.variationIntegral = 0;
     }
     if (DetectorStatus.tentativeDetection > 1) {
       DetectorStatus.antiDetection = 0;
@@ -609,15 +654,19 @@ void stepDetector() {
       DetectorStatus.tentativeDetection = 0;
       DetectorStatus.antiDetection = 0;
     }
-    if (DetectorStatus.tentativeDetection > 1 && DetectorStatus.antiDetection > 1) {
+    else if (DetectorStatus.tentativeDetection > 1 && DetectorStatus.antiDetection > 1) {
       Serial.println(F("Detection-completed"));
+      DetectorStatus.lastDetectionDuration = uptime - DetectorStatus.lastDetectionStart;
       DetectorStatus.tentativeDetection = 0;
       DetectorStatus.antiDetection = 0;
       DetectorStatus.samplesSinceDetection = 0;
     }
   }
   if (DetectorStatus.detectionInBlock && DetectorStatus.tentativeDetection > 0) {
-    Serial.print(F("Det:")); Serial.println(m);
+    DetectorStatus.variationIntegral += m;
+    Serial.print(F("Det:")); Serial.print(m);
+    Serial.print(F(", Int:")); Serial.println(DetectorStatus.variationIntegral);
+    transmitDetection();
   }
   if (DetectorStatus.detectionInBlock) {
     DetectorStatus.samplesSinceDetection ++;
@@ -703,7 +752,7 @@ void transmitHeartbeat() {
   packet[n++] = int(DetectorStatus.stableAverage) & 0xff;
   packet[n++] = (int(DetectorStatus.stableAverage) >> 8) & 0xff;
   // TODO time of last detection start/end packet[n++] = t2;
-  packet[n++] = 0;
+  packet[0] = n;
   packet[n++] = 0;
   // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
   transmitPacket(packet, n);
@@ -781,7 +830,9 @@ void loop() {
   if (measureMlxIf()) {
     MlxStatus.allFrameCounter ++;
 
+    //elapsedMillis t0;
     stepDetector();
+    //Serial.println(t0);
 
     debugRadioTransmitPending = true;
 
