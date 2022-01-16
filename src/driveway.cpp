@@ -6,7 +6,7 @@
 #include "boards.h"
 #include "debug.h"
 #include "radio.h"
-#include "mlx_state.h"
+#include "mlxsensor.h"
 #include "detector.h"
 
 #define SERIAL_BOOT_DELAY_MS 3500
@@ -16,8 +16,6 @@
 #define ERROR_BEACON_RESET_AFTER 5
 
 #define DETECTOR_VARIANCE_THRESHOLD 4
-
-#define MEASURE_FLAGS (MLX90393::X_FLAG | MLX90393::Y_FLAG | MLX90393::Z_FLAG | MLX90393::T_FLAG)
 
 // Set this to true to emulate driveway1, and transmit all frames on radio, in packet compatible with driveway1
 bool modeDebugRadioAllMeasurements = false;
@@ -42,8 +40,11 @@ SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
 const bool inAir9b = true;
 SX1276Radio RadioSX1276(PIN_SX1276_CS, spiSettings, inAir9b);
 
+MLX90393 MlxSensor90303;
+
 driveway::Detector Detector;
 driveway::Radio Radio(RadioSX1276);
+driveway::MlxSensor MlxSensor(MlxSensor90303);
 
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
@@ -105,27 +106,6 @@ void lets_get_started() {
   led_five_short_flash(LED_MAIN);
 }
 
-void print_mlx_state() {
-  uint8_t gainSel, hall, osr, rx, ry, rz, df;
-  MlxSensor.getGainSel(gainSel);
-  MlxSensor.getHallConf(hall);
-  MlxSensor.getOverSampling(osr);
-  MlxSensor.getResolution(rx, ry, rz);
-  MlxSensor.getDigitalFiltering(df);
-  byte nop = MlxSensor.nop();
-  auto mrq = digitalRead(MLX_IRQ);
-
-  Serial.print(F("MLX90393:"));
-  Serial.print(F(" minDelay'=")); Serial.print(MlxStatus.minDelayHeuristic); 
-  Serial.print(F(" gainSel=")); Serial.print(gainSel);
-  Serial.print(F(" hall=")); Serial.print(hall);
-  Serial.print(F(" osr=")); Serial.print(osr);
-  Serial.print(F(" filter=")); Serial.print(df);
-  Serial.print(F(" nop=")); Serial.print(nop);
-  Serial.print(F(" mrq=")); Serial.print(mrq);
-  Serial.println();
-}
-
 void vibrationSensorInterruptHandler() {
   vibration++;
 }
@@ -140,59 +120,14 @@ void setup() {
   Radio.setup();
   Radio.printState();
 
-  setup_mlx();
-  print_mlx_state();
+  MlxSensor.setup();
+  MlxSensor.printState();
 
   lets_get_started();
 
   Detector.setThreshold(DETECTOR_VARIANCE_THRESHOLD);
 }
 
-bool measureMlxRequestIf() {
-  if (MlxStatus.measurePending) {
-    return false;
-  }
-  // Note, we dont have any timing constraints on how soon after a reading we can request again...
-  // DEBUG("measureMlxRequestIf %ld %d %d\n\r", (long)MlxStatus.lastRequest, digitalRead(MLX_IRQ), getBoardTemperature());
-  MlxStatus.returnTime = MlxStatus.lastRequest;
-  MlxStatus.lastRequest = 0;
-  auto status = MlxSensor.startMeasurement(MEASURE_FLAGS);
-  if (status & MLX90393::ERROR_BIT) {
-    MlxStatus.mlxRequestError = true;
-    MlxStatus.lastNopCode = status;
-    Serial.println(F("MLX request error"));
-  } else {
-    MlxStatus.measurePending = true;
-  }
-  return true;
-}
-
-bool measureMlxIf() {
-  if (MlxStatus.mlxRequestError) {
-    return false;
-  }
-  if (MlxStatus.measurePending && (MlxStatus.lastRequest >= MlxStatus.minDelayHeuristic)) {
-    led_mlx(HIGH);
-    // DEBUG("measureMlxIf %ld %ld %u %d\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic, digitalRead(MLX_IRQ));
-    MLX90393::txyzRaw raw;
-    MlxStatus.measureValid = false;
-    auto status = MlxSensor.readMeasurement(MEASURE_FLAGS, raw);
-    if (status & MLX90393::ERROR_BIT) {
-      MlxStatus.mlxReadError = true;
-      MlxStatus.lastNopCode = status;
-      Serial.println(F("MLX read error"));
-    } else {
-      MlxStatus.lastMeasureValid = uptime;
-      MLX90393::txyz& values = MlxStatus.values = MlxSensor.convertRaw(raw);
-      MlxStatus.magnitude = sqrt(values.x * values.x + values.y * values.y + values.z * values.z);
-      MlxStatus.measureValid = true;
-    }
-    MlxStatus.measurePending = false;
-    led_mlx(LOW);
-    return true;
-  }
-  return false;
-}
 
 bool transmitPacket(const void *payload, byte len) {
   led_tx(HIGH);
@@ -204,16 +139,16 @@ bool transmitPacket(const void *payload, byte len) {
 void transmitErrorBeacon() {
   char packet[14];
   // send trailing space as a defensive hack against intermittent bug where last byte not reeived
-  snprintf(packet, sizeof(packet), "FAULT,%02x,%d,%d ", MlxStatus.lastNopCode, MlxStatus.mlxRequestError, MlxStatus.mlxReadError);
+  snprintf(packet, sizeof(packet), "FAULT,%02x,%d,%d ", MlxSensor.getLastNopCode(), MlxSensor.getRequestError(), MlxSensor.getReadError());
   transmitPacket(packet, strlen(packet));
 }
 
 void transmitDebugCollectionFrame() {
   static long counter = 0;
   byte packet[16];
-  const long tEvent = MlxStatus.lastMeasureValid / 10;
-  const uint16_t m = uint16_t(MlxStatus.magnitude);
-  const int t = MlxStatus.values.t;
+  const long tEvent = MlxSensor.getMeasurementTime() / 10;
+  const uint16_t m = uint16_t(MlxSensor.getMagnitude());
+  const int t = MlxSensor.getTemperature();
   byte n = 0;
   packet[n++] = 12;
   packet[n++] = 0x5f;  // not really sF, but hey
@@ -226,7 +161,7 @@ void transmitDebugCollectionFrame() {
   packet[n++] = m & 0xff;
   packet[n++] = (m >> 8) & 0xff;
   // Pack temp into 6 bits. We cant handle negative for now, but ths is for development anyway
-  packet[n++] = (t & 0x3f) | ((MlxStatus.resetCount & 0x3) << 6);
+  packet[n++] = (t & 0x3f) | ((MlxSensor.getResetCount() & 0x3) << 6);
   packet[n++] = 0;
   packet[0] = n;
   packet[n++] = 0;
@@ -269,32 +204,23 @@ void transmitDetection() {
 void printDebugCollectionFrame() {
   auto now = uptime;
   Serial.print(now);
-  Serial.print(F(",mlx"));
-  Serial.print(','); Serial.print(MlxStatus.allFrameCounter);
-  Serial.print(','); Serial.print(MlxStatus.mlxValid);
-  Serial.print(','); Serial.print(MlxStatus.mlxRequestError);
-  Serial.print(','); Serial.print(MlxStatus.mlxReadError);
-  Serial.print(','); Serial.print(MlxStatus.lastNopCode);
-  Serial.print(','); Serial.print(MlxStatus.values.x);
-  Serial.print(','); Serial.print(MlxStatus.values.y);
-  Serial.print(','); Serial.print(MlxStatus.values.z);
-  Serial.print(','); Serial.print(MlxStatus.values.t);
-  Serial.print(','); Serial.print(MlxStatus.magnitude);
+  Serial.print(F(",mlx,"));
+  MlxSensor.printDebugCsv();
   Serial.print(F(",sx1276"));
   Serial.print(','); Serial.print(Radio.isValid());
   Serial.print(F(",timing"));
-  Serial.print(','); Serial.print(now - MlxStatus.lastRequest); // time of call to requestMeasurement
-  Serial.print(','); Serial.print(MlxStatus.returnTime);        // interval between successive requests (eff. rate)
-  Serial.print(','); Serial.print(MlxStatus.lastMeasureValid);  // time after last success return from readMeasurement
+  Serial.print(','); Serial.print(now - MlxSensor.getRequestTime()); // time of call to requestMeasurement
+  Serial.print(','); Serial.print(MlxSensor.getReturnTime());        // interval between successive requests (eff. rate)
+  Serial.print(','); Serial.print(MlxSensor.getMeasurementTime());  // time after last success return from readMeasurement
   Serial.println();
 }
 
 void reportFault() {
   lastErrorBeacon = 0;
   Serial.print(F("Fault"));
-  Serial.print(','); Serial.print(MlxStatus.lastNopCode, HEX);
-  Serial.print(','); Serial.print(MlxStatus.mlxRequestError, HEX);
-  Serial.print(','); Serial.print(MlxStatus.mlxReadError, HEX);
+  Serial.print(','); Serial.print(MlxSensor.getLastNopCode(), HEX);
+  Serial.print(','); Serial.print(MlxSensor.getRequestError(), HEX);
+  Serial.print(','); Serial.print(MlxSensor.getReadError(), HEX);
   Serial.println();
   if (Radio.isValid()) {
     transmitErrorBeacon();
@@ -302,19 +228,17 @@ void reportFault() {
   static int errorBeaconCount = 0;
   if (errorBeaconCount++ > 5) {
     Serial.println(F("MLX fault - will reset"));
-#if defined(XMC_BOARD)
-    NVIC_SystemReset();
-#endif
+    // TODO
     delay(2000);
   }
 }
 
 void loopErrorHandler() {
   // if we got a setup fault, sleep a bit then reset
-  if (!MlxStatus.mlxValid) {
+  if (!MlxSensor.isValid()) {
     Serial.println(F("MLX init fault - will reset shortly"));
   }
-  if (!MlxStatus.mlxValid || MlxStatus.mlxReadError || MlxStatus.mlxRequestError) {
+  if (!MlxSensor.isError()) {
     if (lastErrorBeacon > ERROR_BEACON_INTERVAL) {
       reportFault();
     } else {
@@ -329,15 +253,13 @@ void transmitHeartbeat() {
   static long counter = 0;
   byte packet[32];
   const long now = uptime / 1000;
-  const long tEvent = MlxStatus.lastMeasureValid / 10;
-  const uint16_t m = uint16_t(MlxStatus.magnitude);
-  const int t = MlxStatus.values.t;
+  const long tEvent = MlxSensor.getMeasurementTime() / 10;
+  const uint16_t m = uint16_t(MlxSensor.getMagnitude());
+  const int t = MlxSensor.getTemperature();
   const int stable = Detector.getStableAverage();
   int tc = 0;
-#if defined(XMC_BOARD)
-    tc = devCtrl.getTemperature();
-#elif defined(TEENSYDUINO)
-    tc = InternalTemperature.readTemperatureC();
+#if defined(TEENSYDUINO)
+  tc = InternalTemperature.readTemperatureC();
 #endif
   byte n = 0;
   packet[n++] = 12;
@@ -372,9 +294,7 @@ bool heartbeat() {
   if (lastHeartbeat >= HEARTBEAT_BEACON_MS) {
     digitalWrite(LED_BUILTIN, HIGH);
     int tc = 0;
-#if defined(XMC_BOARD)
-    tc = devCtrl.getTemperature();
-#elif defined(TEENSYDUINO)
+#if defined(TEENSYDUINO)
     tc = InternalTemperature.readTemperatureC();
 #endif
     lastHeartbeat = 0;
@@ -383,7 +303,7 @@ bool heartbeat() {
     Serial.print(',');
     Serial.print(uptime);
     Serial.print(',');
-    Serial.print(MlxStatus.values.t);
+    Serial.print(MlxSensor.getTemperature());
     Serial.print(',');
     Serial.print(tc);
     Serial.print(',');
@@ -416,13 +336,13 @@ void loop() {
 
   // This will return true if a measurement was requested (or an error occurred) - which it will be if none is pending
   // the question is, should there be a minimum interval between reading and next requests (so far, it appears not)
-  bool priorRequestError = MlxStatus.mlxRequestError;
-  measureMlxRequestIf();
+  bool priorRequestError = MlxSensor.getRequestError();
+  MlxSensor.measureAsyncStart();
 
   // This will transmit the latest state, at full bore, as long as last request (not reading) succeeded
   // measureValid will be false if request succeeded then reading failed
   bool sentDebugRadioPacket = false;
-  if (modeDebugRadioAllMeasurements && MlxStatus.measureValid && debugRadioTransmitPending) {
+  if (modeDebugRadioAllMeasurements && MlxSensor.getMeasurementValid() && debugRadioTransmitPending) {
     if (Radio.isValid()) {
       transmitDebugCollectionFrame();
     } else {
@@ -437,12 +357,10 @@ void loop() {
   debugRadioTransmitPending = false;
 
   // This will return true whether reading completed or an error occurred
-  bool priorReadError = MlxStatus.mlxReadError;
-  if (measureMlxIf()) {
-    MlxStatus.allFrameCounter ++;
-
+  bool priorReadError = MlxSensor.getReadError();
+  if (MlxSensor.measureAsyncComplete()) {
     //elapsedMillis t0;
-    transmitted = Detector.next(MlxStatus.magnitude);
+    transmitted = Detector.next(MlxSensor.getMagnitude());
     if (transmitted) {
       transmitDetection(); // TODO - work out why this is slowing the loop
     }
@@ -452,19 +370,21 @@ void loop() {
 
     // print debug to serial, either continuous, or on a sample if we have a constrained debug link like an ESP01
     if (modeDebugSerialAllMeasurements) {
-      if ((debugSerialSampleFrameInterval < 1) || (MlxStatus.allFrameCounter % debugSerialSampleFrameInterval == 0)) {
+      if ((debugSerialSampleFrameInterval < 1) || (MlxSensor.getCompletedMeasurements() % debugSerialSampleFrameInterval == 0)) {
         printDebugCollectionFrame();
       }
     }
   }
 
   bool newFault = false;
-  if (MlxStatus.mlxRequestError && priorRequestError != MlxStatus.mlxRequestError) {
+  bool rqError = MlxSensor.getRequestError();
+  bool rxError = MlxSensor.getReadError();
+  if (rqError && priorRequestError != rqError) {
     // we just had a request fail start
     Serial.println(F("MLX request fault detect"));
     newFault = true;
   }
-  if (MlxStatus.mlxReadError && priorReadError != MlxStatus.mlxReadError) {
+  if (rxError && priorReadError != rxError) {
     // we just had a read fail start
     Serial.println(F("MLX read fault detect"));
     newFault = true;
@@ -476,7 +396,7 @@ void loop() {
   }
   if (!transmitted && !heartbeat()) {
     if (!sentDebugRadioPacket) {
-      if (MlxStatus.lastRequest + 15 < MlxStatus.minDelayHeuristic) {
+      if (MlxSensor.getRequestTime() + 15 < MlxSensor.getMinDelayAdjusted()) {
         delay(15);
       }
     }
