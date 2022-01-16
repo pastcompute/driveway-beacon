@@ -5,7 +5,7 @@
 
 #include "boards.h"
 #include "debug.h"
-#include "radio_state.h"
+#include "radio.h"
 #include "mlx_state.h"
 #include "detector.h"
 
@@ -38,7 +38,12 @@ bool debugRadioTransmitPending = false;
 elapsedMillis lastErrorBeacon;
 elapsedMillis lastHeartbeat;
 
+SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
+const bool inAir9b = true;
+SX1276Radio RadioSX1276(PIN_SX1276_CS, spiSettings, inAir9b);
+
 driveway::Detector Detector;
+driveway::Radio Radio(RadioSX1276);
 
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
@@ -100,23 +105,6 @@ void lets_get_started() {
   led_five_short_flash(LED_MAIN);
 }
 
-void print_radio_state() {
-  // Read settings directly out of the radio as a sanity check
-  uint32_t carrier_hz = 0;
-  byte sf = 0;
-  SPI.begin();
-  Radio.ReadCarrier(carrier_hz);
-  Radio.ReadSpreadingFactor(sf);
-  SPI.end();
-
-  Serial.print(F("sx1276: ver=")); Serial.print(RadioStatus.sx1276Version);
-  Serial.print(F(" fault=")); Serial.print(!RadioStatus.sx1276Valid);
-  Serial.print(F(" tune=")); Serial.print(carrier_hz);
-  Serial.print(F(" sf=")); Serial.print(sf);
-  Serial.print(F(" toa(13)=")); Serial.print(Radio.PredictTimeOnAir(13));
-  Serial.println();
-}
-
 void print_mlx_state() {
   uint8_t gainSel, hall, osr, rx, ry, rz, df;
   MlxSensor.getGainSel(gainSel);
@@ -149,8 +137,8 @@ void setup() {
   pinMode(PIN_VIBRATION, INPUT_PULLDOWN);
   attachInterrupt(PIN_VIBRATION, vibrationSensorInterruptHandler, FALLING);
 
-  setup_radio();
-  print_radio_state();
+  Radio.setup();
+  Radio.printState();
 
   setup_mlx();
   print_mlx_state();
@@ -207,17 +195,8 @@ bool measureMlxIf() {
 }
 
 bool transmitPacket(const void *payload, byte len) {
-  bool ok = false;
   led_tx(HIGH);
-  SPI.begin();
-  if (!Radio.TransmitMessage(payload, len, false)) {
-    // TX TIMEOUT - interrupt bit not set by the predicted toa...
-    Radio.Standby(); // in case...
-  } else {
-    // Radio.Standby on success should not be required...
-    ok = true;
-  }
-  SPI.end();
+  bool ok = Radio.transmitPacket(payload, len);
   led_tx(LOW);
   return ok;
 }
@@ -226,12 +205,7 @@ void transmitErrorBeacon() {
   char packet[14];
   // send trailing space as a defensive hack against intermittent bug where last byte not reeived
   snprintf(packet, sizeof(packet), "FAULT,%02x,%d,%d ", MlxStatus.lastNopCode, MlxStatus.mlxRequestError, MlxStatus.mlxReadError);
-  SPI.begin();
-  if (!Radio.TransmitMessage(packet, strlen(packet), false)) {
-    // TX TIMEOUT - interrupt bit not set by the predicted toa...
-  }
-  Radio.Standby();
-  SPI.end();
+  transmitPacket(packet, strlen(packet));
 }
 
 void transmitDebugCollectionFrame() {
@@ -307,7 +281,7 @@ void printDebugCollectionFrame() {
   Serial.print(','); Serial.print(MlxStatus.values.t);
   Serial.print(','); Serial.print(MlxStatus.magnitude);
   Serial.print(F(",sx1276"));
-  Serial.print(','); Serial.print(RadioStatus.sx1276Valid);
+  Serial.print(','); Serial.print(Radio.isValid());
   Serial.print(F(",timing"));
   Serial.print(','); Serial.print(now - MlxStatus.lastRequest); // time of call to requestMeasurement
   Serial.print(','); Serial.print(MlxStatus.returnTime);        // interval between successive requests (eff. rate)
@@ -322,7 +296,7 @@ void reportFault() {
   Serial.print(','); Serial.print(MlxStatus.mlxRequestError, HEX);
   Serial.print(','); Serial.print(MlxStatus.mlxReadError, HEX);
   Serial.println();
-  if (RadioStatus.sx1276Valid) {
+  if (Radio.isValid()) {
     transmitErrorBeacon();
   }
   static int errorBeaconCount = 0;
@@ -449,10 +423,10 @@ void loop() {
   // measureValid will be false if request succeeded then reading failed
   bool sentDebugRadioPacket = false;
   if (modeDebugRadioAllMeasurements && MlxStatus.measureValid && debugRadioTransmitPending) {
-    if (RadioStatus.sx1276Valid) {
+    if (Radio.isValid()) {
       transmitDebugCollectionFrame();
     } else {
-      delay(Radio.PredictTimeOnAir(13) + 8);
+      delay(RadioSX1276.PredictTimeOnAir(13) + 8);
     }
   } else {
     // prevent overheating due to tight loop
