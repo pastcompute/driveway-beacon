@@ -123,19 +123,11 @@ void setup() {
   Detector.setThreshold(DETECTOR_VARIANCE_THRESHOLD);
 }
 
-
-bool transmitPacket(const void *payload, byte len) {
-  led_tx(HIGH);
-  bool ok = Radio.transmitPacket(payload, len);
-  led_tx(LOW);
-  return ok;
-}
-
 void transmitErrorBeacon() {
   char packet[14];
   // send trailing space as a defensive hack against intermittent bug where last byte not reeived
   snprintf(packet, sizeof(packet), "FAULT,%02x,%d,%d ", MlxSensor.getLastNopCode(), MlxSensor.getRequestError(), MlxSensor.getReadError());
-  transmitPacket(packet, strlen(packet));
+  Radio.transmitPacket(packet, strlen(packet));
 }
 
 void transmitDebugCollectionFrame() {
@@ -161,7 +153,7 @@ void transmitDebugCollectionFrame() {
   packet[0] = n;
   packet[n++] = 0;
   // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
-  transmitPacket(packet, n);
+  Radio.transmitPacket(packet, n);
   counter ++;
 }
 
@@ -192,7 +184,7 @@ void transmitDetection() {
   packet[n++] = var & 0xff;
   packet[0] = n;
   packet[n++] = 0;
-  transmitPacket(packet, n);
+  Radio.transmitPacket(packet, n);
   counter ++;
 }
 
@@ -281,7 +273,7 @@ void transmitHeartbeat() {
   packet[0] = n;
   packet[n++] = 0;
   // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
-  transmitPacket(packet, n);
+  Radio.transmitPacket(packet, n);
   counter ++;
 }
 

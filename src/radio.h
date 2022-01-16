@@ -7,6 +7,8 @@
 #define SX1276_RESET_LOW_TIME 10
 #define SX1276_RESET_WAIT_TIME 50
 
+extern void led_tx(uint8_t);
+
 namespace driveway {
 
 class Radio
@@ -91,6 +93,7 @@ void Radio::printState() {
 
 bool Radio::transmitPacket(const void *payload, byte len) {
   bool ok = false;
+  led_tx(HIGH);
   SPI.begin();
   if (!this->radio.TransmitMessage(payload, len, false)) {
     // TX TIMEOUT - interrupt bit not set by the predicted toa...
@@ -99,7 +102,8 @@ bool Radio::transmitPacket(const void *payload, byte len) {
     // Radio.Standby on success should not be required...
     ok = true;
   }
-   SPI.end();
+  SPI.end();
+  led_tx(LOW);
   return ok;
 }
 
