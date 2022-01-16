@@ -38,7 +38,7 @@ bool debugRadioTransmitPending = false;
 elapsedMillis lastErrorBeacon;
 elapsedMillis lastHeartbeat;
 
-DetectorModel Detector;
+driveway::Detector Detector;
 
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
@@ -468,7 +468,7 @@ void loop() {
     MlxStatus.allFrameCounter ++;
 
     //elapsedMillis t0;
-    transmitted = Detector.next();
+    transmitted = Detector.next(MlxStatus.magnitude);
     if (transmitted) {
       transmitDetection(); // TODO - work out why this is slowing the loop
     }

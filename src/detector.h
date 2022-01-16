@@ -3,7 +3,9 @@
 
 extern elapsedMillis uptime;
 
-class DetectorModel {
+namespace driveway {
+
+class Detector {
 private:
   int idx;
   int threshold;
@@ -32,10 +34,10 @@ public:
   uint16_t getStableAverage() const { return stableAverage; }
   uint16_t getLastId() const { return id; }
 
-  bool next();
+  bool next(float magnitude);
   void setThreshold(int threshold) { this->threshold = threshold; }
 
-  DetectorModel()
+  Detector()
   : idx(0),
     threshold(1),
     dwellLength(22), // ~2 second blocks
@@ -54,7 +56,7 @@ public:
   { }
 };
 
-bool DetectorModel::next() {
+bool Detector::next(float magnitude) {
   // Algorithm
   // - non-overlapt "integration" by averaging a block of samples
   // - if we get a spike above or below the previous average then probably a detection
@@ -62,7 +64,7 @@ bool DetectorModel::next() {
 
   // DEBUG("%d %d\n\r", this->idx, (int)this->dwellAggregate);
   bool transmitted = false;
-  float m = MlxStatus.magnitude;
+  float m = magnitude;
   this->idx ++;
   this->dwellAggregate += m;
 
@@ -162,6 +164,8 @@ bool DetectorModel::next() {
     transmitted = false;
   }
   return transmitted;
+}
+
 }
 
 #endif

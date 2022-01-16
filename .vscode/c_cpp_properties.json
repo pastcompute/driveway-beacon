@@ -10,6 +10,7 @@
                 "~/.platformio/packages/toolchain-gccarmnoneeabi/lib/gcc/arm-none-eabi/**",
                 "~/.platformio/packages/framework-arduinoteensy/cores/**",
                 "~/.platformio/packages/framework-arduinoteensy/libraries/**",
+                "${workspaceFolder}/src/**",
                 "${workspaceFolder}/lib/**",
                 "${workspaceFolder}/include/**",
                 "${workspaceFolder}/.pio/libdeps/**"
