@@ -3,7 +3,7 @@
         {
             "name": "Arduino-teensy",
             "forcedInclude": [
-                "~/.platformio/packages/framework-arduinoteensy/cores/teensy/Arduino.h"
+                "~/.platformio/packages/framework-arduinoteensy/cores/teensy3/Arduino.h"
             ],
             "includePath": [
                 "~/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/**",

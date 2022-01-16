@@ -7,6 +7,7 @@
 #include "debug.h"
 #include "radio.h"
 #include "mlxsensor.h"
+#include "vibrationsensor.h"
 #include "detector.h"
 
 #define SERIAL_BOOT_DELAY_MS 3500
@@ -30,8 +31,6 @@ int debugSerialSampleFrameInterval = 0; //10;
 
 elapsedMillis uptime;
 
-volatile byte vibration = 0;
-
 bool debugRadioTransmitPending = false;
 elapsedMillis lastErrorBeacon;
 elapsedMillis lastHeartbeat;
@@ -45,6 +44,7 @@ MLX90393 MlxSensor90303;
 driveway::Detector Detector;
 driveway::Radio Radio(RadioSX1276);
 driveway::MlxSensor MlxSensor(MlxSensor90303);
+driveway::VibrationSensor VibrationSensor(PIN_VIBRATION);
 
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
@@ -106,16 +106,11 @@ void lets_get_started() {
   led_five_short_flash(LED_MAIN);
 }
 
-void vibrationSensorInterruptHandler() {
-  vibration++;
-}
-
 void setup() {
   setup_led();
   welcome();
 
-  pinMode(PIN_VIBRATION, INPUT_PULLDOWN);
-  attachInterrupt(PIN_VIBRATION, vibrationSensorInterruptHandler, FALLING);
+  VibrationSensor.setup();
 
   Radio.setup();
   Radio.printState();
@@ -307,7 +302,7 @@ bool heartbeat() {
     Serial.print(',');
     Serial.print(tc);
     Serial.print(',');
-    Serial.print(vibration);
+    Serial.print(VibrationSensor.getRawCount());
     // todo: stats
     Serial.println();
     delay(50);
@@ -323,13 +318,11 @@ void loop() {
 
   bool transmitted = false;
 
-  static byte lastVibration = 0;
-  byte v = vibration;
-  if (v != lastVibration) {
-    lastVibration = v;
-    Serial.print(F("Vibration...")); Serial.println(v);
+  if (long v = VibrationSensor.poll()) {
+   Serial.print(F("Vibration...")); Serial.println(v);
     // TODO - use a latching heuristic, send a message...
   }
+
   // We need to interleave requesting and reading the MLX results with transmitting the previous result
   // because both have a time to conclusion
   // DEBUG("loop %ld\n\r", (long)uptime);

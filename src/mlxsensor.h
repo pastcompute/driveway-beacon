@@ -1,5 +1,5 @@
-#ifndef DRIVEWAY_MONITOR_MLX_STATE_H__
-#define DRIVEWAY_MONITOR_MLX_STATE_H__
+#ifndef DRIVEWAY_MONITOR_MLX_SENSOR_H__
+#define DRIVEWAY_MONITOR_MLX_SENSOR_H__
 
 extern void led_mlx(uint8_t);
 extern elapsedMillis uptime;
