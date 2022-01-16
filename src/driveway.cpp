@@ -305,6 +305,45 @@ bool heartbeat() {
   return false;
 }
 
+// given the values of request error & read error before and after calling the async functions
+// see if fsult state changed
+bool detectFaultLatch(bool priorRequestError, bool priorReadError) {
+  bool newFault = false;
+  bool rqError = MlxSensor.getRequestError();
+  bool rxError = MlxSensor.getReadError();
+  if (rqError && priorRequestError != rqError) {
+    // we just had a request fail start
+    Serial.println(F("MLX request fault detect"));
+    newFault = true;
+  }
+  if (rxError && priorReadError != rxError) {
+    // we just had a read fail start
+    Serial.println(F("MLX read fault detect"));
+    newFault = true;
+  }
+  return newFault;
+}
+
+bool developmentTransmit() {
+  // This will transmit the latest state, at full bore, as long as last request (not reading) succeeded
+  // measureValid will be false if request succeeded then reading failed
+  bool packetSent = false;
+  if (modeDebugRadioAllMeasurements && MlxSensor.getMeasurementValid() && debugRadioTransmitPending) {
+    if (Radio.isValid()) {
+      transmitDebugCollectionFrame();
+    } else {
+      delay(RadioSX1276.PredictTimeOnAir(13) + 8);
+    }
+    packetSent = true;
+  } else {
+    // prevent overheating due to tight loop
+    // hypothesis - we end up up-rounding the mlx measure interval to tDelay x k
+    //delay(500);
+  }
+  debugRadioTransmitPending = false;
+  return packetSent;
+}
+
 void loop() {
   loopErrorHandler();
 
@@ -324,22 +363,7 @@ void loop() {
   bool priorRequestError = MlxSensor.getRequestError();
   MlxSensor.measureAsyncStart();
 
-  // This will transmit the latest state, at full bore, as long as last request (not reading) succeeded
-  // measureValid will be false if request succeeded then reading failed
-  bool sentDebugRadioPacket = false;
-  if (modeDebugRadioAllMeasurements && MlxSensor.getMeasurementValid() && debugRadioTransmitPending) {
-    if (Radio.isValid()) {
-      transmitDebugCollectionFrame();
-    } else {
-      delay(RadioSX1276.PredictTimeOnAir(13) + 8);
-    }
-  } else {
-    // prevent overheating due to tight loop
-    // hypothesis - we end up up-rounding the mlx measure interval to tDelay x k
-    //delay(500);
-    sentDebugRadioPacket = true;
-  }
-  debugRadioTransmitPending = false;
+  bool packetSent = developmentTransmit();
 
   // This will return true whether reading completed or an error occurred
   bool priorReadError = MlxSensor.getReadError();
@@ -351,6 +375,7 @@ void loop() {
     }
     //Serial.println(t0);
 
+    // signal next loop that developmentTransmit should transmit
     debugRadioTransmitPending = true;
 
     // print debug to serial, either continuous, or on a sample if we have a constrained debug link like an ESP01
@@ -361,26 +386,15 @@ void loop() {
     }
   }
 
-  bool newFault = false;
-  bool rqError = MlxSensor.getRequestError();
-  bool rxError = MlxSensor.getReadError();
-  if (rqError && priorRequestError != rqError) {
-    // we just had a request fail start
-    Serial.println(F("MLX request fault detect"));
-    newFault = true;
-  }
-  if (rxError && priorReadError != rxError) {
-    // we just had a read fail start
-    Serial.println(F("MLX read fault detect"));
-    newFault = true;
-  }
+  bool newFault = detectFaultLatch(priorRequestError, priorReadError);
   // if we have an error state, transmit an error beacon at 5 second intervals
   if (newFault) {
     reportFault();
     return;
   }
+  // yield the CPU if we have time
   if (!transmitted && !heartbeat()) {
-    if (!sentDebugRadioPacket) {
+    if (!packetSent) {
       if (MlxSensor.getRequestTime() + 15 < MlxSensor.getMinDelayAdjusted()) {
         delay(15);
       }
