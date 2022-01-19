@@ -42,10 +42,25 @@ SX1276Radio RadioSX1276(PIN_SX1276_CS, spiSettings, inAir9b);
 
 MLX90393 MlxSensor90303;
 
+namespace driveway {
+class Board {
+public:
+  float readTemperatureC() {
+#if defined(TEENSYDUINO)
+    return InternalTemperature.readTemperatureC();
+#else
+    return 0;
+#endif
+  }
+};
+}
+
+driveway::Board Board1;
 driveway::Detector Detector;
 driveway::Radio Radio(RadioSX1276);
 driveway::MlxSensor MlxSensor(MlxSensor90303);
 driveway::VibrationSensor VibrationSensor(PIN_VIBRATION);
+driveway::Protocol<driveway::Board, driveway::MlxSensor, driveway::Detector> Protocol(Board1, MlxSensor, Detector);
 
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
@@ -225,6 +240,7 @@ void loopErrorHandler() {
   // if we got a setup fault, sleep a bit then reset
   if (!MlxSensor.isValid()) {
     Serial.println(F("MLX init fault - will reset shortly"));
+    delay(5000);
   }
   if (!MlxSensor.isError()) {
     if (lastErrorBeacon > ERROR_BEACON_INTERVAL) {
@@ -238,6 +254,7 @@ void loopErrorHandler() {
 }
 
 void transmitHeartbeat() {
+#if 0
   static long counter = 0;
   byte packet[32];
   const long now = uptime / 1000;
@@ -276,7 +293,10 @@ void transmitHeartbeat() {
   // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
 
   Radio.transmitPacket(packet, n);
-  counter ++;
+#endif
+
+  LoraMessage msg = Protocol.heartbeat();
+  Radio.transmitPacket(msg.getBytes(), msg.getLength());
 }
 
 bool heartbeat() {
