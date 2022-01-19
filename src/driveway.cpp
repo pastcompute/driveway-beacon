@@ -239,7 +239,7 @@ void loopErrorHandler() {
 
 void transmitHeartbeat() {
   static long counter = 0;
-  //byte packet[32];
+  byte packet[32];
   const long now = uptime / 1000;
   const long tEvent = MlxSensor.getMeasurementTime();
   const float m = MlxSensor.getMagnitude();
@@ -249,43 +249,33 @@ void transmitHeartbeat() {
 #if defined(TEENSYDUINO)
   tc = InternalTemperature.readTemperatureC();
 #endif
-  // byte n = 0;
-  // packet[n++] = 12;
-  // packet[n++] = 0x5f;  // not really sF, but hey
-  // packet[n++] = 0xbb;     // this type of message
-  // packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 255 packets, just useful for detecting skip
-  // packet[n++] = (counter & 0xff);
-  // // uptime
-  // packet[n++] = now & 0xff;
-  // packet[n++] = (now >> 8) & 0xff;
-  // packet[n++] = (now >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  // // last valid measurement
-  // packet[n++] = tEvent & 0xff;
-  // packet[n++] = (tEvent >> 8) & 0xff;
-  // packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  // // last measurement
-  // packet[n++] = m & 0xff;
-  // packet[n++] = (m >> 8) & 0xff;
-  // packet[n++] = t;
-  // packet[n++] = tc;
-  // packet[n++] = stable & 0xff;
-  // packet[n++] = (stable >> 8) & 0xff;
-  // // TODO time of last detection start/end packet[n++] = t2;
-  // packet[0] = n;
-  // packet[n++] = 0;
-  // // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
+  byte n = 0;
+  packet[n++] = 12;
+  packet[n++] = 0x5f;  // not really sF, but hey
+  packet[n++] = 0xbb;     // this type of message
+  packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 255 packets, just useful for detecting skip
+  packet[n++] = (counter & 0xff);
+  // uptime
+  packet[n++] = now & 0xff;
+  packet[n++] = (now >> 8) & 0xff;
+  packet[n++] = (now >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
+  // last valid measurement
+  packet[n++] = tEvent & 0xff;
+  packet[n++] = (tEvent >> 8) & 0xff;
+  packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
+  // last measurement
+  packet[n++] = uint32_t(m) & 0xff;
+  packet[n++] = (uint32_t(m) >> 8) & 0xff;
+  packet[n++] = t;
+  packet[n++] = tc;
+  packet[n++] = stable & 0xff;
+  packet[n++] = (stable >> 8) & 0xff;
+  // TODO time of last detection start/end packet[n++] = t2;
+  packet[0] = n;
+  packet[n++] = 0;
+  // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
 
-  lpp.reset();
-  lpp.addUnixTime(1, now);
-  lpp.addTemperature(1, tc);
-
-  lpp.addUnixTime(2, tEvent);
-  lpp.addTemperature(2, t);
-  lpp.addGenericSensor(2, m);
-  lpp.addDigitalInput(2, counter);
-  lpp.addAnalogInput(2, stable);
-
-  Radio.transmitPacket(lpp.getBuffer(), lpp.getSize());
+  Radio.transmitPacket(packet, n);
   counter ++;
 }
 
