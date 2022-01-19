@@ -105,6 +105,9 @@ void MlxSensor::setup() {
       snprintf(buf, sizeof(buf), "i2c device at %02x", (int)addr);
       Serial.println(buf);
     }
+    if (addr % 8 == 0) {
+      Serial.flush();
+    }
   }
   if (MLX90393::STATUS_OK != this->sensor.begin(0, 0, -1, Wire)) {
     this->lastNopCode = this->sensor.nop();

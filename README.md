@@ -1,11 +1,8 @@
-
-# Build - XMC1100 xmc2go
+# Build - Teensy LC
 
 ```
-pio run --target xmc1100_xmc2go
-pio run -e xmc1100_xmc2go -t upload
+pio run -e tlc~driveway -t upload
 ```
-
 
 # Original Setup
 
@@ -15,18 +12,16 @@ python3 get-platformio.py
 echo 'PATH=$PATH:~/.platformio/penv/bin' >> ~/.profile
 
 <login again>
-
-pio project init --board xmc1100_xmc2go --board esp01
-git init; git add -A; git commit -m init
 ```
 
-For the moment:
+Dependencies:
 
 ```
-cd ..
-git clone path/to/sentrifarm
-cd $OLDPWD
+
+pio lib install "aparcar/CayenneLPP@^1.3.0" "bblanchon/ArduinoJson@^6.19.1"
+
 cd lib
 git clone https://github.com/pastcompute/arduino-MLX90393
-ln -s ../../sentrifarm/software/mcu/libraries/SX1276lib
+git clone https://github.com/pastcompute/sx1276-arduino
 ```
+
