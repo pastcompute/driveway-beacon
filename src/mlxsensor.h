@@ -29,6 +29,7 @@ private:
   uint16_t minDelayHeuristic;
   
   elapsedMillis lastRequest;
+  elapsedMillis lastResult;
   long returnTime;
   bool measurePending;
 
@@ -88,7 +89,7 @@ public:
 };
 
 void MlxSensor::reconfigure() {
-  Serial.println(F("configure_mlx"));
+  Serial.println(F("conf_mlx"));
   // FIXME WHEN WE WIRE IT UP pinMode(MLX_IRQ, INPUT_PULLDOWN);
   uint8_t r;
   r = this->sensor.reset(); // beware, this changes defaults from begin()
@@ -124,7 +125,7 @@ void MlxSensor::setup() {
     Wire.beginTransmission(addr);
     int error = Wire.endTransmission();
     if (error == 0) {
-      snprintf(buf, sizeof(buf), " i2c device at %02x", (int)addr);
+      snprintf(buf, sizeof(buf), " i2c found @ %02x", (int)addr);
       Serial.print(buf);
       Serial.flush();
     }
@@ -135,11 +136,11 @@ void MlxSensor::setup() {
     delay(500);
     auto s = this->sensor.begin(0, 0, -1, Wire);
     if (MLX90393::STATUS_OK != s) {
-      Serial.print(F("Init Code: MLX: OR'd="));
+      Serial.print(F("MlxInitCode-OR'd="));
       Serial.println(s);
       this->lastNopCode = this->sensor.nop();
       if (this->sensor.hasError(this->lastNopCode)) {
-        Serial.print(F("Init Fault: MLX: nop="));
+        Serial.print(F("MlxInitFault-nop="));
         Serial.print(this->lastNopCode);
         Serial.println(F(", retrying..."));
         this->sensor.reset();
@@ -149,7 +150,7 @@ void MlxSensor::setup() {
       break;
     }
   }
-  DEBUG("mlxValid=%d,mlxRequestError=%d,mlxReadError=%d\n\r", mlxValid, mlxRequestError, mlxReadError);
+  DEBUG("mlxValid=%d,mlxReqErr=%d,mlxReadErr=%d\n\r", mlxValid, mlxRequestError, mlxReadError);
 }
 
 void MlxSensor::printState() {
@@ -186,7 +187,7 @@ bool MlxSensor::measureAsyncStart() {
   if (status & MLX90393::ERROR_BIT) {
     this->mlxRequestError = true;
     this->lastNopCode = status;
-    Serial.println(F("MLX request error"));
+    Serial.println(F("MLX-req-err"));
   } else {
     this->measurePending = true;
   }
@@ -206,7 +207,7 @@ bool MlxSensor::measureAsyncComplete() {
     if (status & MLX90393::ERROR_BIT) {
       this->mlxReadError = true;
       this->lastNopCode = status;
-      Serial.println(F("MLX read error"));
+      Serial.println(F("MLX-read-err"));
     } else {
       auto prior = this->lastMeasureValid;
       this->lastMeasureValid = uptime;

@@ -33,6 +33,7 @@ public:
   float getDetectionIntegral() const { return variationIntegral; }
   uint16_t getStableAverage() const { return stableAverage; }
   uint16_t getLastId() const { return id; }
+  bool isDetecting() const { return detectionInBlock; }
 
   bool next(float magnitude);
   void setThreshold(int threshold) { this->threshold = threshold; }
@@ -80,7 +81,7 @@ bool Detector::next(float magnitude) {
       this->idx = 0;
       if (this->stableAverage < 0) {
         this->stableAverage = average;
-        Serial.print(F("stable-average,"));
+        Serial.print(F("stable-av,"));
         Serial.print(this->stableAverage);
         Serial.println();
         return false;
@@ -88,16 +89,16 @@ bool Detector::next(float magnitude) {
       // Update average if there has been no detection in this block
       if (!this->detectionInBlock) {
         this->stableAverage = average;
-        Serial.print(F("stable-average,"));
+        Serial.print(F("stable-av,"));
         Serial.print(this->stableAverage);
         Serial.println();
       } else {
         this->continuousDetectingDwells ++;
         if (this->continuousDetectingDwells > 20) {
           // est. 3 minutes...
-          Serial.print(F("Extended detection period... update stable background"));
+          Serial.print(F("Extended... update stable background"));
           this->stableAverage = average;
-          Serial.print(F("new-stable-average,"));
+          Serial.print(F("new-stable-av,"));
           Serial.print(this->stableAverage);
           Serial.println();
           this->continuousDetectingDwells = 0;
@@ -114,7 +115,7 @@ bool Detector::next(float magnitude) {
     if (this->tentativeDetection == 2) {
       // detection...
       // go until a double 0
-      Serial.print(F("Detection-confirmed,"));
+      Serial.print(F("Det-conf,"));
       Serial.print(this->stableAverage);
       Serial.print(',');
       Serial.print(m);
@@ -139,7 +140,7 @@ bool Detector::next(float magnitude) {
       this->antiDetection = 0;
     }
     else if (this->tentativeDetection > 1 && this->antiDetection > 1) {
-      Serial.println(F("Detection-completed"));
+      Serial.println(F("Det-completed"));
       this->lastDetectionDuration = uptime - this->lastDetectionStart;
       this->tentativeDetection = 0;
       this->antiDetection = 0;
@@ -157,7 +158,7 @@ bool Detector::next(float magnitude) {
     this->samplesSinceDetection ++;
   }
   if (this->samplesSinceDetection > this->dwellLength * 5) {
-    Serial.println(F("Detection-cleared"));
+    Serial.println(F("Det-cleared"));
     this->detectionInBlock = false; // allow stable average to update again after 5 more dwells
     this->samplesSinceDetection = 0;
     this->tentativeDetection = 0;

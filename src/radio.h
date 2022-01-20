@@ -46,7 +46,7 @@ void Radio::reconfigure() {
   // Just read this once, rather than continuously
   this->sx1276Version = this->radio.ReadVersion();
   if (!this->radio.Begin()) {
-    Serial.println(F("Init Fault: SX1276"));
+    Serial.println(F("InitFault: SX1276"));
   } else {
     // Aim for improved (shorter) ToA
     this->radio.SetSpreadingFactor(7);

@@ -27,15 +27,15 @@ public:
     mlx(mlx),
     detector(detector)
   { }
-  LoraMessage heartbeat();
-  LoraMessage detection();
+  LoraMessage heartbeat(bool vibrationLatched);
+  LoraMessage detection(bool vibrationLatched);
 #if DRIVEWAY_DATA_COLLECTOR_ENABLED
   LoraMessage debugCollection();
 #endif
 };
 
 template<typename Board, typename MlxSensor, typename Detector>
-LoraMessage Protocol<Board, MlxSensor, Detector>::heartbeat() {
+LoraMessage Protocol<Board, MlxSensor, Detector>::heartbeat(bool vibrationLatched) {
   static long counter = 0;
   LoraMessage message;
   message
@@ -47,13 +47,15 @@ LoraMessage Protocol<Board, MlxSensor, Detector>::heartbeat() {
     .addUnixtime(mlx.getMeasurementTime())
     .addUint16(CLAMP_MAX(mlx.getMagnitude(), 9999))
     .addUint16(CLAMP_MAX(detector.getStableAverage(), 65535))
+    .addBitmap(detector.isDetecting(), vibrationLatched, false, false, false, false, false, false) // note, left is 0x80
+    .addUint8(MAGIC)
     ;
   counter ++;
   return message;
 }
 
 template<typename Board, typename MlxSensor, typename Detector>
-LoraMessage Protocol<Board, MlxSensor, Detector>::detection() {
+LoraMessage Protocol<Board, MlxSensor, Detector>::detection(bool vibrationLatched) {
   static long counter = 0;
   LoraMessage message;
   message
@@ -66,6 +68,8 @@ LoraMessage Protocol<Board, MlxSensor, Detector>::detection() {
     .addUint16(detector.getLastDetectionDuration() / 100)
     .addUint16(CLAMP_MAX(detector.getDetectionIntegral() / 100, 65535))
     .addUint16(CLAMP_MAX(detector.getStableAverage(), 65535))
+    .addBitmap(detector.isDetecting(), vibrationLatched, false, false, false, false, false, false) // note, left is 0x80
+    .addUint8(MAGIC)
     ;
   counter ++;
   return message;

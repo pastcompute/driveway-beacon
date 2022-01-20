@@ -107,7 +107,7 @@ void welcome() {
 
   Serial.begin(115200);
   Serial.println(F("SentriFarm Magnetic Field Disruption Probe"));
-  Serial.print(F("Device: "));
+  Serial.print(F("Board: "));
   Serial.println(F(BOARD_NAME));
 }
 
@@ -130,6 +130,8 @@ void setup() {
   lets_get_started();
 
   Detector.setThreshold(DETECTOR_VARIANCE_THRESHOLD);
+  extern void transmitStartBeacon();
+  transmitStartBeacon();
 }
 
 void printDebugCollectionFrame() {
@@ -171,12 +173,19 @@ bool heartbeat() {
     lastHeartbeat = 0;
     digitalWrite(LED_MAIN, HIGH);
     printHeartbeatMessage();
-    LoraMessage msg = Protocol.heartbeat();
+    LoraMessage msg = Protocol.heartbeat(VibrationSensor.latched());
     Radio.transmitPacket(msg.getBytes(), msg.getLength());
     digitalWrite(LED_MAIN, LOW);
     return true;
   }
   return false;
+}
+
+void transmitStartBeacon() {
+  char packet[14];
+  // send trailing space as a defensive hack against intermittent bug where last byte not reeived
+  snprintf(packet, sizeof(packet), "!BOOT,%02x,%d,%d ", MlxSensor.getLastNopCode(), MlxSensor.getRequestError(), MlxSensor.getReadError());
+  Radio.transmitPacket(packet, strlen(packet));
 }
 
 void transmitErrorBeacon() {
@@ -194,7 +203,7 @@ void reportFault() {
   }
   static int errorBeaconCount = 0;
   if (errorBeaconCount++ > 5) {
-    Serial.println(F("MLX fault - will reset"));
+    Serial.println(F("MLX fault: reset"));
     // TODO !
     delay(2000);
   }
@@ -208,12 +217,12 @@ bool detectFaultLatch(bool priorRequestError, bool priorReadError) {
   bool rxError = MlxSensor.getReadError();
   if (rqError && priorRequestError != rqError) {
     // we just had a request fail start
-    Serial.println(F("MLX request fault detect"));
+    Serial.println(F("MLX request fault"));
     newFault = true;
   }
   if (rxError && priorReadError != rxError) {
     // we just had a read fail start
-    Serial.println(F("MLX read fault detect"));
+    Serial.println(F("MLX read fault"));
     newFault = true;
   }
   return newFault;
@@ -246,7 +255,7 @@ bool developmentTransmit() {
 void loopErrorHandler() {
   // if we got a setup fault, sleep a bit then reset
   if (!MlxSensor.isValid()) {
-    Serial.println(F("MLX init fault - will reset shortly"));
+    Serial.println(F("MLX init fault - reset soon"));
     delay(5000);
   }
   if (MlxSensor.isError()) {
@@ -264,9 +273,9 @@ void loop() {
   // DEBUG("loop %ld\n\r", (long)uptime);
   loopErrorHandler();
 
+  // Update the vibration latch if any interrupts occured since the last loop
   if (long v = VibrationSensor.poll()) {
-   Serial.print(F("Vibration...")); Serial.println(v);
-    // TODO - use a latching heuristic, send a message...
+    Serial.print(F("vibr,")); Serial.println(v);
   }
 
   // We need to interleave requesting and reading the MLX results with transmitting the previous result
@@ -282,17 +291,11 @@ void loop() {
   // This will return true whether reading completed or an error occurred
   bool priorReadError = MlxSensor.getReadError();
   bool transmitted = false;
+  bool detection = false;
   if (MlxSensor.measureAsyncComplete()) {
     if (MlxSensor.getCompletedMeasurements() > 0) { mlxMeasurementInterval.add(MlxSensor.getMeasurementInterval()); }
-    bool newDetection = Detector.next(MlxSensor.getMagnitude());
-    if (newDetection) {
-      LoraMessage msg = Protocol.detection();
-      Radio.transmitPacket(msg.getBytes(), msg.getLength()); // TODO - work out why this is slowing the loop
-      transmitted = true;
-      // this takes 65 milliseconds, which is getting close to the measurement rate of 79
-      // which is why we set transmitted to true, so it wont spin-delay below (in any case there is the 15 ms margin)
-    }
-
+    detection = Detector.next(MlxSensor.getMagnitude());
+#if DRIVEWAY_DATA_COLLECTOR_ENABLED
     // signal next loop that developmentTransmit should transmit
     debugRadioTransmitPending = true;
 
@@ -302,6 +305,18 @@ void loop() {
         printDebugCollectionFrame();
       }
     }
+#endif    
+  }
+
+  // During the detection keep sending messages
+  // later we could refine it by reducing the period to once per second...
+  bool vibrationLatched = VibrationSensor.latched();
+  if (detection || vibrationLatched) {
+    LoraMessage msg = Protocol.detection(vibrationLatched);
+    Radio.transmitPacket(msg.getBytes(), msg.getLength()); // TODO - work out why this is slowing the loop
+    transmitted = true;
+    // this takes 65 milliseconds, which is getting close to the measurement rate of 79
+    // which is why we set transmitted to true, so it wont spin-delay below (in any case there is the 15 ms margin)
   }
 
   bool newFault = detectFaultLatch(priorRequestError, priorReadError);
