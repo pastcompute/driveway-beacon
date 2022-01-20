@@ -21,14 +21,14 @@ private:
   uint16_t continuousDetectingDwells; // used to detect "permanent" background change
 
   uint16_t id;
-  long lastDetectionStart;
+  uint32_t lastDetectionStart;
   uint16_t lastDetectionDuration;
   float variationIntegral;
 
   bool detectionInBlock;
 
 public:
-  long getLastDetectionStart() const { return lastDetectionStart; } 
+  uint32_t getLastDetectionStart() const { return lastDetectionStart; } 
   uint16_t getLastDetectionDuration() const { return lastDetectionDuration; }
   float getDetectionIntegral() const { return variationIntegral; }
   uint16_t getStableAverage() const { return stableAverage; }

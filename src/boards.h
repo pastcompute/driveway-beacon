@@ -36,12 +36,31 @@
 #error "Unsupported configuration"
 #endif
 
-template<typename T> T getBoardTemperature() {
+namespace driveway {
+class Board {
+public:
+  void setup() {
 #if defined(TEENSYDUINO)
-  return InternalTemperature.readTemperatureC();
+    // prepare to read Vcc or other analog ops
+    analogReference(DEFAULT);
+    analogReadResolution(12);
+    analogReadAveraging(32);
+#endif    
+  }
+
+  float readVcc() {
+    // TODO
+    return 0;
+  }
+
+  float readTemperatureC() {
+#if defined(TEENSYDUINO)
+    return InternalTemperature.readTemperatureC();
 #else
-  return 0;
+    return 0;
 #endif
+  }
+};
 }
 
 #endif

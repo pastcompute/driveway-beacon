@@ -3,9 +3,9 @@
 #include <elapsedMillis.h>
 #include <SPI.h>
 
-#include "protocol.h"
 #include "boards.h"
 #include "debug.h"
+#include "protocol.h"
 #include "radio.h"
 #include "mlxsensor.h"
 #include "vibrationsensor.h"
@@ -14,10 +14,14 @@
 #define SERIAL_BOOT_DELAY_MS 3500
 #define SHORT_LED_FLASH_MS 150
 
-#define ERROR_BEACON_INTERVAL 1000
+#define ERROR_BEACON_INTERVAL_MS 1000
 #define ERROR_BEACON_RESET_AFTER 5
 
+#define DRIVEWAY_DATA_COLLECTOR_ENABLED 0
+
 #define DETECTOR_VARIANCE_THRESHOLD 4
+
+#define HEARTBEAT_BEACON_MS 15000
 
 // Set this to true to emulate driveway1, and transmit all frames on radio, in packet compatible with driveway1
 bool modeDebugRadioAllMeasurements = false;
@@ -27,8 +31,6 @@ bool modeDebugSerialAllMeasurements = false;
 
 // Set this to 0, to print all frames, otherwise, 10 to print every 10th, to emulate driveway1, etc.
 int debugSerialSampleFrameInterval = 0; //10;
-
-#define HEARTBEAT_BEACON_MS 15000
 
 elapsedMillis uptime;
 
@@ -40,25 +42,12 @@ SPISettings spiSettings(1000000, MSBFIRST, SPI_MODE0);
 const bool inAir9b = true;
 SX1276Radio RadioSX1276(PIN_SX1276_CS, spiSettings, inAir9b);
 
-MLX90393 MlxSensor90303;
-
-namespace driveway {
-class Board {
-public:
-  float readTemperatureC() {
-#if defined(TEENSYDUINO)
-    return InternalTemperature.readTemperatureC();
-#else
-    return 0;
-#endif
-  }
-};
-}
+MLX90393 Mlx90393;
 
 driveway::Board Board1;
 driveway::Detector Detector;
 driveway::Radio Radio(RadioSX1276);
-driveway::MlxSensor MlxSensor(MlxSensor90303);
+driveway::MlxSensor MlxSensor(Mlx90393);
 driveway::VibrationSensor VibrationSensor(PIN_VIBRATION);
 driveway::Protocol<driveway::Board, driveway::MlxSensor, driveway::Detector> Protocol(Board1, MlxSensor, Detector);
 
@@ -139,71 +128,6 @@ void setup() {
   Detector.setThreshold(DETECTOR_VARIANCE_THRESHOLD);
 }
 
-void transmitErrorBeacon() {
-  char packet[14];
-  // send trailing space as a defensive hack against intermittent bug where last byte not reeived
-  snprintf(packet, sizeof(packet), "FAULT,%02x,%d,%d ", MlxSensor.getLastNopCode(), MlxSensor.getRequestError(), MlxSensor.getReadError());
-  Radio.transmitPacket(packet, strlen(packet));
-}
-
-void transmitDebugCollectionFrame() {
-  static long counter = 0;
-  byte packet[16];
-  const long tEvent = MlxSensor.getMeasurementTime() / 10;
-  const uint16_t m = uint16_t(MlxSensor.getMagnitude());
-  const int t = MlxSensor.getTemperature();
-  byte n = 0;
-  packet[n++] = 12;
-  packet[n++] = 0x5f;  // not really sF, but hey
-  packet[n++] = 1;     // this type of message
-  packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 65535 packets, just useful for detecting skip
-  packet[n++] = (counter & 0xff);
-  packet[n++] = tEvent & 0xff;
-  packet[n++] = (tEvent >> 8) & 0xff;
-  packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  packet[n++] = m & 0xff;
-  packet[n++] = (m >> 8) & 0xff;
-  // Pack temp into 6 bits. We cant handle negative for now, but ths is for development anyway
-  packet[n++] = (t & 0x3f) | ((MlxSensor.getResetCount() & 0x3) << 6);
-  packet[n++] = 0;
-  packet[0] = n;
-  packet[n++] = 0;
-  // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
-  Radio.transmitPacket(packet, n);
-  counter ++;
-}
-
-void transmitDetection() {
-  static long counter = 0;
-  byte packet[17];
-  byte n = 0;
-  uint32_t tEvent = Detector.getLastDetectionStart() / 10;
-  uint16_t duration = Detector.getLastDetectionDuration() / 100;
-  uint16_t var = min(65535, Detector.getDetectionIntegral());
-  uint16_t stable = Detector.getStableAverage();
-  uint16_t id = Detector.getLastId();
-  packet[n++] = 12;
-  packet[n++] = 0x5f;  // not really sF, but hey
-  packet[n++] = 2;     // this type of message
-  packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 65535 packets, just useful for detecting skip
-  packet[n++] = (counter & 0xff);
-  packet[n++] = tEvent & 0xff;
-  packet[n++] = (tEvent >> 8) & 0xff;
-  packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  packet[n++] = (id >> 8) & 0xff;
-  packet[n++] = id & 0xff;
-  packet[n++] = (duration >> 8) & 0xff;
-  packet[n++] = duration & 0xff;
-  packet[n++] = (stable >> 8) & 0xff;
-  packet[n++] = stable & 0xff;
-  packet[n++] = (var >> 8) & 0xff;
-  packet[n++] = var & 0xff;
-  packet[0] = n;
-  packet[n++] = 0;
-  Radio.transmitPacket(packet, n);
-  counter ++;
-}
-
 void printDebugCollectionFrame() {
   auto now = uptime;
   Serial.print(now);
@@ -215,116 +139,60 @@ void printDebugCollectionFrame() {
   Serial.print(','); Serial.print(now - MlxSensor.getRequestTime()); // time of call to requestMeasurement
   Serial.print(','); Serial.print(MlxSensor.getReturnTime());        // interval between successive requests (eff. rate)
   Serial.print(','); Serial.print(MlxSensor.getMeasurementTime());  // time after last success return from readMeasurement
-  Serial.println();
+  Serial.println(); Serial.flush();
 }
 
-void reportFault() {
-  lastErrorBeacon = 0;
+void printFaultMessage() {
   Serial.print(F("Fault"));
   Serial.print(','); Serial.print(MlxSensor.getLastNopCode(), HEX);
   Serial.print(','); Serial.print(MlxSensor.getRequestError(), HEX);
   Serial.print(','); Serial.print(MlxSensor.getReadError(), HEX);
-  Serial.println();
+  Serial.println(); Serial.flush();
+}
+
+void printHeartbeatMessage() {
+    Serial.print("Heartbeat");
+    Serial.print(','); Serial.print(uptime);
+    Serial.print(','); Serial.print(Board1.readVcc());
+    Serial.print(','); Serial.print(Board1.readTemperatureC());
+    Serial.print(','); Serial.print(MlxSensor.getTemperature());
+    Serial.print(','); Serial.print(Detector.getStableAverage());
+    Serial.print(','); Serial.print(VibrationSensor.getRawCount());
+    Serial.println(); Serial.flush();
+}
+
+bool heartbeat() {
+  if (lastHeartbeat >= HEARTBEAT_BEACON_MS) {
+    lastHeartbeat = 0;
+    digitalWrite(LED_MAIN, HIGH);
+    printHeartbeatMessage();
+    LoraMessage msg = Protocol.heartbeat();
+    Radio.transmitPacket(msg.getBytes(), msg.getLength());
+    digitalWrite(LED_MAIN, LOW);
+    return true;
+  }
+  return false;
+}
+
+void transmitErrorBeacon() {
+  char packet[14];
+  // send trailing space as a defensive hack against intermittent bug where last byte not reeived
+  snprintf(packet, sizeof(packet), "!FAULT,%02x,%d,%d ", MlxSensor.getLastNopCode(), MlxSensor.getRequestError(), MlxSensor.getReadError());
+  Radio.transmitPacket(packet, strlen(packet));
+}
+
+void reportFault() {
+  lastErrorBeacon = 0;
+  printFaultMessage();
   if (Radio.isValid()) {
     transmitErrorBeacon();
   }
   static int errorBeaconCount = 0;
   if (errorBeaconCount++ > 5) {
     Serial.println(F("MLX fault - will reset"));
-    // TODO
+    // TODO !
     delay(2000);
   }
-}
-
-void loopErrorHandler() {
-  // if we got a setup fault, sleep a bit then reset
-  if (!MlxSensor.isValid()) {
-    Serial.println(F("MLX init fault - will reset shortly"));
-    delay(5000);
-  }
-  if (!MlxSensor.isError()) {
-    if (lastErrorBeacon > ERROR_BEACON_INTERVAL) {
-      reportFault();
-    } else {
-    }
-    // Looks like we always need a delay in the loop if we dont print anything, or things end up hanging...
-    delay(500);
-    return;
-  }
-}
-
-void transmitHeartbeat() {
-#if 0
-  static long counter = 0;
-  byte packet[32];
-  const long now = uptime / 1000;
-  const long tEvent = MlxSensor.getMeasurementTime();
-  const float m = MlxSensor.getMagnitude();
-  const float t = MlxSensor.getTemperature();
-  const int stable = Detector.getStableAverage();
-  float tc = 0;
-#if defined(TEENSYDUINO)
-  tc = InternalTemperature.readTemperatureC();
-#endif
-  byte n = 0;
-  packet[n++] = 12;
-  packet[n++] = 0x5f;  // not really sF, but hey
-  packet[n++] = 0xbb;     // this type of message
-  packet[n++] = (counter >> 8) & 0xff; // auto wrap counter @ 255 packets, just useful for detecting skip
-  packet[n++] = (counter & 0xff);
-  // uptime
-  packet[n++] = now & 0xff;
-  packet[n++] = (now >> 8) & 0xff;
-  packet[n++] = (now >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  // last valid measurement
-  packet[n++] = tEvent & 0xff;
-  packet[n++] = (tEvent >> 8) & 0xff;
-  packet[n++] = (tEvent >> 16) & 0xff;   // ms into 100ths of a second --> 2^24 * 10 is ~40 hours of operation
-  // last measurement
-  packet[n++] = uint32_t(m) & 0xff;
-  packet[n++] = (uint32_t(m) >> 8) & 0xff;
-  packet[n++] = t;
-  packet[n++] = tc;
-  packet[n++] = stable & 0xff;
-  packet[n++] = (stable >> 8) & 0xff;
-  // TODO time of last detection start/end packet[n++] = t2;
-  packet[0] = n;
-  packet[n++] = 0;
-  // DEBUG("transmitDebugCollectionFrame %d\n\r", counter);
-
-  Radio.transmitPacket(packet, n);
-#endif
-
-  LoraMessage msg = Protocol.heartbeat();
-  Radio.transmitPacket(msg.getBytes(), msg.getLength());
-}
-
-bool heartbeat() {
-  if (lastHeartbeat >= HEARTBEAT_BEACON_MS) {
-    digitalWrite(LED_BUILTIN, HIGH);
-    int tc = 0;
-#if defined(TEENSYDUINO)
-    tc = InternalTemperature.readTemperatureC();
-#endif
-    lastHeartbeat = 0;
-    Serial.print("Heartbeat,");
-    Serial.print(Detector.getStableAverage());
-    Serial.print(',');
-    Serial.print(uptime);
-    Serial.print(',');
-    Serial.print(MlxSensor.getTemperature());
-    Serial.print(',');
-    Serial.print(tc);
-    Serial.print(',');
-    Serial.print(VibrationSensor.getRawCount());
-    // todo: stats
-    Serial.println();
-    delay(50);
-    digitalWrite(LED_BUILTIN, LOW);
-    transmitHeartbeat();
-    return true;
-  }
-  return false;
 }
 
 // given the values of request error & read error before and after calling the async functions
@@ -347,6 +215,7 @@ bool detectFaultLatch(bool priorRequestError, bool priorReadError) {
 }
 
 bool developmentTransmit() {
+#if DRIVEWAY_DATA_COLLECTOR_ENABLED
   // This will transmit the latest state, at full bore, as long as last request (not reading) succeeded
   // measureValid will be false if request succeeded then reading failed
   bool packetSent = false;
@@ -364,12 +233,31 @@ bool developmentTransmit() {
   }
   debugRadioTransmitPending = false;
   return packetSent;
+#else
+  return false;
+#endif
+}
+
+void loopErrorHandler() {
+  // if we got a setup fault, sleep a bit then reset
+  if (!MlxSensor.isValid()) {
+    Serial.println(F("MLX init fault - will reset shortly"));
+    delay(5000);
+  }
+  if (MlxSensor.isError()) {
+    if (lastErrorBeacon > ERROR_BEACON_INTERVAL_MS) {
+      reportFault();
+    } else {
+    }
+    // Looks like we always need a delay in the loop if we dont print anything, or things end up hanging...
+    delay(500);
+    return;
+  }
 }
 
 void loop() {
+  // DEBUG("loop %ld\n\r", (long)uptime);
   loopErrorHandler();
-
-  bool transmitted = false;
 
   if (long v = VibrationSensor.poll()) {
    Serial.print(F("Vibration...")); Serial.println(v);
@@ -378,22 +266,24 @@ void loop() {
 
   // We need to interleave requesting and reading the MLX results with transmitting the previous result
   // because both have a time to conclusion
-  // DEBUG("loop %ld\n\r", (long)uptime);
 
   // This will return true if a measurement was requested (or an error occurred) - which it will be if none is pending
   // the question is, should there be a minimum interval between reading and next requests (so far, it appears not)
   bool priorRequestError = MlxSensor.getRequestError();
   MlxSensor.measureAsyncStart();
 
-  bool packetSent = developmentTransmit();
+  bool developmentPacketSent = developmentTransmit();
 
   // This will return true whether reading completed or an error occurred
   bool priorReadError = MlxSensor.getReadError();
+  bool transmitted = false;
   if (MlxSensor.measureAsyncComplete()) {
     //elapsedMillis t0;
-    transmitted = Detector.next(MlxSensor.getMagnitude());
-    if (transmitted) {
-      transmitDetection(); // TODO - work out why this is slowing the loop
+    bool newDetection = Detector.next(MlxSensor.getMagnitude());
+    if (newDetection) {
+      LoraMessage msg = Protocol.detection();
+      Radio.transmitPacket(msg.getBytes(), msg.getLength()); // TODO - work out why this is slowing the loop
+      transmitted = true;
     }
     //Serial.println(t0);
 
@@ -414,9 +304,10 @@ void loop() {
     reportFault();
     return;
   }
-  // yield the CPU if we have time
+
+  // yield the CPU if we have time to spare
   if (!transmitted && !heartbeat()) {
-    if (!packetSent) {
+    if (!developmentPacketSent) {
       if (MlxSensor.getRequestTime() + 15 < MlxSensor.getMinDelayAdjusted()) {
         delay(15);
       }

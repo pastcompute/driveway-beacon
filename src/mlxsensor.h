@@ -4,6 +4,14 @@
 extern void led_mlx(uint8_t);
 extern elapsedMillis uptime;
 
+#define VERBOSE_DEBUG_SETUPMLX 0
+
+#if VERBOSE_DEBUG_SETUPMLX
+#define DEBUG_SETUPMLX(x ...) { char buf[128]; snprintf(buf, sizeof(buf), x); Serial.print(buf); }
+#else
+#define DEBUG_SETUPMLX(x ...)
+#endif
+
 namespace driveway {
 
 class MlxSensor
@@ -78,14 +86,23 @@ public:
 
 void MlxSensor::reconfigure() {
   Serial.println(F("configure_mlx"));
-  pinMode(MLX_IRQ, INPUT_PULLDOWN);
-  this->sensor.reset(); // beware, this changes defaults from begin()
-  this->sensor.setGainSel(7);
-  this->sensor.setResolution(0, 0, 0);
-  this->sensor.setOverSampling(3); // increases mindelay
-  this->sensor.setTemperatureCompensation(0);
-  this->sensor.setDigitalFiltering(5); // reduces mindelay
-  this->lastNopCode = this->sensor.nop();
+  // FIXME WHEN WE WIRE IT UP pinMode(MLX_IRQ, INPUT_PULLDOWN);
+  uint8_t r;
+  r = this->sensor.reset(); // beware, this changes defaults from begin()
+  DEBUG_SETUPMLX("%02x <-- reset\n\r", r);
+  r = this->sensor.setGainSel(7);
+  DEBUG_SETUPMLX("%02x <-- setGainSel\n\r", r);
+  r = this->sensor.setResolution(0, 0, 0);
+  DEBUG_SETUPMLX("%02x <-- setResolution\n\r", r);
+  r = this->sensor.setOverSampling(3); // increases mindelay
+  DEBUG_SETUPMLX("%02x <-- setOverSampling\n\r", r);
+  r = this->sensor.setTemperatureCompensation(0);
+  DEBUG_SETUPMLX("%02x <-- setTemperatureCompensation\n\r", r);
+  r = this->sensor.setDigitalFiltering(5); // reduces mindelay
+  DEBUG_SETUPMLX("%02x <-- setDigitalFiltering\n\r", r);
+  r = this->lastNopCode = this->sensor.nop();
+  DEBUG_SETUPMLX("%02x <-- nop\n\r", r);
+  (void)r;
   auto minDelay = this->sensor.convDelayMillis();
   this->minDelayHeuristic = (minDelay < 1) ? 1 : minDelay + 10;
   this->mlxValid = true;
@@ -93,28 +110,43 @@ void MlxSensor::reconfigure() {
 
 void MlxSensor::setup() {
   Serial.println(F("setup_mlx"));
+  Serial.flush();
   this->mlxValid = false;
   // For some reason if we dont scan the bus, some boards wont pick it up
+  // There also seems to be some dicey interaction with the serial port, at least at this early point.
   Wire.begin();
   for (byte addr=3; addr < 127; addr++) {
     char buf[32];
-    snprintf(buf, sizeof(buf), "Scanning i2c addr %02x", (int)addr);      Serial.println(buf);
+    Serial.print('.');
     Wire.beginTransmission(addr);
     int error = Wire.endTransmission();
     if (error == 0) {
-      snprintf(buf, sizeof(buf), "i2c device at %02x", (int)addr);
-      Serial.println(buf);
-    }
-    if (addr % 8 == 0) {
+      snprintf(buf, sizeof(buf), " i2c device at %02x", (int)addr);
+      Serial.print(buf);
       Serial.flush();
     }
   }
-  if (MLX90393::STATUS_OK != this->sensor.begin(0, 0, -1, Wire)) {
-    this->lastNopCode = this->sensor.nop();
-    Serial.println(F("Init Fault: MLX"));
-  } else {
-    this->reconfigure();
+  Serial.println();
+  Serial.flush();
+  for (int retry=0; retry < 3; retry++) {
+    delay(500);
+    auto s = this->sensor.begin(0, 0, -1, Wire);
+    if (MLX90393::STATUS_OK != s) {
+      Serial.print(F("Init Code: MLX: OR'd="));
+      Serial.println(s);
+      this->lastNopCode = this->sensor.nop();
+      if (this->sensor.hasError(this->lastNopCode)) {
+        Serial.print(F("Init Fault: MLX: nop="));
+        Serial.print(this->lastNopCode);
+        Serial.println(F(", retrying..."));
+        this->sensor.reset();
+      }
+    } else {
+      this->reconfigure();
+      break;
+    }
   }
+  DEBUG("mlxValid=%d,mlxRequestError=%d,mlxReadError=%d\n\r", mlxValid, mlxRequestError, mlxReadError);
 }
 
 void MlxSensor::printState() {
@@ -135,6 +167,7 @@ void MlxSensor::printState() {
   Serial.print(F(" filter=")); Serial.print(df);
   Serial.print(F(" nop=")); Serial.print(nop);
   Serial.print(F(" mrq=")); Serial.print(mrq);
+  Serial.print(F(" err=")); Serial.print(isError()); // Serial.print(','); Serial.print(this->mlxRequestError); Serial.print(','); Serial.print(this->mlxReadError);
   Serial.println();
 }
 
@@ -143,7 +176,7 @@ bool MlxSensor::measureAsyncStart() {
     return false;
   }
   // Note, we dont have any timing constraints on how soon after a reading we can request again...
-  // DEBUG("measureMlxRequestIf %ld %d %d\n\r", (long)MlxStatus.lastRequest, digitalRead(MLX_IRQ), getBoardTemperature());
+  DEBUG("measureMlxRequestIf %ld %d %d\n\r", (long)this->lastRequest, digitalRead(MLX_IRQ), (int)getBoardTemperature<float>());
   this->returnTime = this->lastRequest;
   this->lastRequest = 0;
   auto status = this->sensor.startMeasurement(MEASURE_FLAGS);
@@ -163,7 +196,7 @@ bool MlxSensor::measureAsyncComplete() {
   }
   if (this->measurePending && (this->lastRequest >= this->minDelayHeuristic)) {
     led_mlx(HIGH);
-    // DEBUG("measureMlxIf %ld %ld %u %d\n\r", (long)MlxStatus.lastRequest, (long)uptime, MlxStatus.minDelayHeuristic, digitalRead(MLX_IRQ));
+    DEBUG("measureMlxIf %ld %ld %u %d\n\r", (long)this->lastRequest, (long)uptime, this->minDelayHeuristic, digitalRead(MLX_IRQ));
     MLX90393::txyzRaw raw;
     this->measureValid = false;
     auto status = this->sensor.readMeasurement(MEASURE_FLAGS, raw);

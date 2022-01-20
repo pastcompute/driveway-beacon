@@ -3,8 +3,9 @@
 
 #define VERBOSE 0
 
-#if VERBOSE
 #include <stdio.h>
+
+#if VERBOSE
 #define DEBUG(x ...) { char buf[128]; snprintf(buf, sizeof(buf), x); Serial.print(buf); }
 #else
 #define DEBUG(x ...)
