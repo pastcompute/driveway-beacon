@@ -11,6 +11,8 @@
 #include "vibrationsensor.h"
 #include "detector.h"
 
+#include <RunningAverage.h>
+
 #define SERIAL_BOOT_DELAY_MS 3500
 #define SHORT_LED_FLASH_MS 150
 
@@ -50,6 +52,8 @@ driveway::Radio Radio(RadioSX1276);
 driveway::MlxSensor MlxSensor(Mlx90393);
 driveway::VibrationSensor VibrationSensor(PIN_VIBRATION);
 driveway::Protocol<driveway::Board, driveway::MlxSensor, driveway::Detector> Protocol(Board1, MlxSensor, Detector);
+
+RunningAverage mlxMeasurementInterval(30);
 
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
@@ -156,6 +160,7 @@ void printHeartbeatMessage() {
     Serial.print(','); Serial.print(Board1.readVcc());
     Serial.print(','); Serial.print(Board1.readTemperatureC());
     Serial.print(','); Serial.print(MlxSensor.getTemperature());
+    Serial.print(','); Serial.print(mlxMeasurementInterval.getAverage());
     Serial.print(','); Serial.print(Detector.getStableAverage());
     Serial.print(','); Serial.print(VibrationSensor.getRawCount());
     Serial.println(); Serial.flush();
@@ -278,14 +283,15 @@ void loop() {
   bool priorReadError = MlxSensor.getReadError();
   bool transmitted = false;
   if (MlxSensor.measureAsyncComplete()) {
-    //elapsedMillis t0;
+    if (MlxSensor.getCompletedMeasurements() > 0) { mlxMeasurementInterval.add(MlxSensor.getMeasurementInterval()); }
     bool newDetection = Detector.next(MlxSensor.getMagnitude());
     if (newDetection) {
       LoraMessage msg = Protocol.detection();
       Radio.transmitPacket(msg.getBytes(), msg.getLength()); // TODO - work out why this is slowing the loop
       transmitted = true;
+      // this takes 65 milliseconds, which is getting close to the measurement rate of 79
+      // which is why we set transmitted to true, so it wont spin-delay below (in any case there is the 15 ms margin)
     }
-    //Serial.println(t0);
 
     // signal next loop that developmentTransmit should transmit
     debugRadioTransmitPending = true;

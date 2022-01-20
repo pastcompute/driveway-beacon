@@ -33,6 +33,7 @@ private:
   bool measurePending;
 
   bool measureValid;
+  long lastMeasureInterval;
   long lastMeasureValid;
 
   bool mlxRequestError;
@@ -60,6 +61,7 @@ public:
   bool getReadError() const { return mlxReadError; }
   long getRequestTime() const { return lastRequest; }
   long getMeasurementTime() const { return lastMeasureValid; }
+  long getMeasurementInterval() const { return lastMeasureInterval; }
   byte getLastNopCode() const { return lastNopCode; }
   float getMagnitude() const { return magnitude; }
   float getTemperature() const { return values.t; }
@@ -77,6 +79,7 @@ public:
     returnTime(0),
     measurePending(false),
     measureValid(false),
+    lastMeasureInterval(0),
     lastMeasureValid(0),
     mlxRequestError(false),
     mlxReadError(false),
@@ -205,7 +208,9 @@ bool MlxSensor::measureAsyncComplete() {
       this->lastNopCode = status;
       Serial.println(F("MLX read error"));
     } else {
+      auto prior = this->lastMeasureValid;
       this->lastMeasureValid = uptime;
+      this->lastMeasureInterval = this->lastMeasureValid - prior;
       MLX90393::txyz& values = this->values = this->sensor.convertRaw(raw);
       this->magnitude = sqrt(values.x * values.x + values.y * values.y + values.z * values.z);
       this->measureValid = true;
