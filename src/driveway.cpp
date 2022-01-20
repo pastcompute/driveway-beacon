@@ -54,6 +54,7 @@ driveway::VibrationSensor VibrationSensor(PIN_VIBRATION);
 driveway::Protocol<driveway::Board, driveway::MlxSensor, driveway::Detector> Protocol(Board1, MlxSensor, Detector);
 
 RunningAverage mlxMeasurementInterval(30);
+elapsedMillis timeSinceDetectionMessage;
 
 // For the teensy, we just flash the one LED on a heartbeat only
 // Perhaps it turns out, on the XMC the LED were part of the problem?
@@ -312,11 +313,17 @@ void loop() {
   // later we could refine it by reducing the period to once per second...
   bool vibrationLatched = VibrationSensor.latched();
   if (detection || vibrationLatched) {
-    LoraMessage msg = Protocol.detection(vibrationLatched);
-    Radio.transmitPacket(msg.getBytes(), msg.getLength()); // TODO - work out why this is slowing the loop
-    transmitted = true;
-    // this takes 65 milliseconds, which is getting close to the measurement rate of 79
-    // which is why we set transmitted to true, so it wont spin-delay below (in any case there is the 15 ms margin)
+    if (detection || timeSinceDetectionMessage > 500) {
+      LoraMessage msg = Protocol.detection(vibrationLatched);
+      Radio.transmitPacket(msg.getBytes(), msg.getLength()); // TODO - work out why this is slowing the loop
+      transmitted = true;
+      timeSinceDetectionMessage = 0; // if we are only vibration latched, send once per 1/2 second
+      // but send all magnet detections
+      // TODO keep sending for another several seconds
+
+      // this takes 65 milliseconds, which is getting close to the measurement rate of 79
+      // which is why we set transmitted to true, so it wont spin-delay below (in any case there is the 15 ms margin)
+    }
   }
 
   bool newFault = detectFaultLatch(priorRequestError, priorReadError);

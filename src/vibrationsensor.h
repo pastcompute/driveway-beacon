@@ -54,7 +54,7 @@ long VibrationSensor::poll() {
     vibrationLatchedSince = 0;
     return v;
   } else {
-    if (vibrationLatchedSince > vibrationLatchInterval_ms) {
+    if (vibrationLatched && vibrationLatchedSince > vibrationLatchInterval_ms) {
       Serial.println("Vibration 0");
       vibrationLatched = false;
     }
