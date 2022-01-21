@@ -289,7 +289,7 @@ void loop() {
 
   bool developmentPacketSent = developmentTransmit();
 
-  // This will return true whether reading completed or an error occurred
+  // This will return true if a reading completed or an error occurred
   bool priorReadError = MlxSensor.getReadError();
   bool transmitted = false;
   bool detection = false;
@@ -323,6 +323,9 @@ void loop() {
 
       // this takes 65 milliseconds, which is getting close to the measurement rate of 79
       // which is why we set transmitted to true, so it wont spin-delay below (in any case there is the 15 ms margin)
+
+      // in the future we can make transmitPacket() asynchronous will it waits for toa
+      // which may let us do other work
     }
   }
 
